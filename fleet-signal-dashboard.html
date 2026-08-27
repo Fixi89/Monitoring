@@ -231,6 +231,7 @@ tbody tr:hover{background:var(--panel-2);}
       <span class="meta-pill" id="metaPill">No data loaded</span>
       <span class="meta-pill" id="syncPill">Connecting to review database…</span>
       <button class="btn" id="exportBtn" style="display:none;">Export CSV</button>
+      <button class="btn" id="exportXlsxBtn" style="display:none;">Export Excel</button>
       <button class="btn btn-primary" id="uploadBtn">Update data</button>
       <button class="btn" id="folderBtn" title="Select an entire folder of CSV/Excel files">Select folder</button>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.zip" multiple>
@@ -254,9 +255,9 @@ tbody tr:hover{background:var(--panel-2);}
   <div id="dashboard" style="display:none;">
     <div class="kpis">
       <div class="kpi"><p class="label">Monitored devices</p><p class="value" id="kpiTotal">0</p><p class="sub" id="kpiTotalSub">&nbsp;</p></div>
-      <div class="kpi" style="border-color:var(--unreachable);"><p class="label">Never reachable</p><p class="value" id="kpiUnreachable" style="color:var(--unreachable);">0</p><p class="sub" id="kpiUnreachableSub">&nbsp;</p></div>
-      <div class="kpi never"><p class="label">Never sent data</p><p class="value" id="kpiNever">0</p><p class="sub" id="kpiNeverSub">&nbsp;</p></div>
-      <div class="kpi stale"><p class="label">Reachable, not sending</p><p class="value" id="kpiStale">0</p><p class="sub" id="kpiStaleSub">&nbsp;</p></div>
+      <div class="kpi" style="border-color:var(--unreachable);"><p class="label">Never reached</p><p class="value" id="kpiUnreachable" style="color:var(--unreachable);">0</p><p class="sub" id="kpiUnreachableSub">&nbsp;</p></div>
+      <div class="kpi never"><p class="label">No data received</p><p class="value" id="kpiNever">0</p><p class="sub" id="kpiNeverSub">&nbsp;</p></div>
+      <div class="kpi stale"><p class="label">Data outdated</p><p class="value" id="kpiStale">0</p><p class="sub" id="kpiStaleSub">&nbsp;</p></div>
       <div class="kpi ok"><p class="label">Sending data</p><p class="value" id="kpiOk">0</p><p class="sub" id="kpiOkSub">&nbsp;</p></div>
     </div>
 
@@ -276,7 +277,7 @@ tbody tr:hover{background:var(--panel-2);}
     <div class="panels">
       <div class="panel">
         <h3 id="typeChartTitle">Issues by device type</h3>
-        <p class="hint" id="typeChartHint">Devices that have never been reachable, never sent data, or gone quiet — bar length is the issue count</p>
+        <p class="hint" id="typeChartHint">Devices that have never been reached, received no data, or have outdated data — bar length is the issue count</p>
         <div id="typeChartWrap" style="position:relative;height:260px;">
           <canvas id="typeChart" role="img" aria-label="Horizontal stacked bar chart of device issue counts"></canvas>
         </div>
@@ -286,9 +287,22 @@ tbody tr:hover{background:var(--panel-2);}
         <h3>Fleet status split</h3>
         <p class="hint">Share of devices in the current chart scope</p>
         <div style="position:relative;height:210px;">
-          <canvas id="statusDonut" role="img" aria-label="Donut chart of the proportion of devices never reachable, never sending, reachable but not sending, and sending data"></canvas>
+          <canvas id="statusDonut" role="img" aria-label="Donut chart of the proportion of devices never reached, with no data received, with outdated data, and sending data"></canvas>
         </div>
         <div class="legend legend-stack" id="donutLegend"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="trendPanel" style="margin-bottom:22px;display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+        <div>
+          <h3>Fleet health over time</h3>
+          <p class="hint">One snapshot per day this dashboard was used — % sending (left axis) and total monitored devices (right axis)</p>
+        </div>
+        <span class="meta-pill" id="trendCount"></span>
+      </div>
+      <div style="position:relative;height:220px;margin-top:6px;">
+        <canvas id="trendChart" role="img" aria-label="Line chart of percentage of devices sending data and total device count over time"></canvas>
       </div>
     </div>
 
@@ -297,9 +311,9 @@ tbody tr:hover{background:var(--panel-2);}
       <select id="statusFilter">
         <option value="issues">Status: issues only</option>
         <option value="all">Status: all</option>
-        <option value="unreachable">Status: never reachable</option>
-        <option value="never">Status: never sent</option>
-        <option value="stale">Status: reachable, not sending</option>
+        <option value="unreachable">Status: never reached</option>
+        <option value="never">Status: no data received</option>
+        <option value="stale">Status: data outdated</option>
         <option value="ok">Status: sending data</option>
       </select>
       <select id="checkedFilter">
@@ -380,6 +394,8 @@ tbody tr:hover{background:var(--panel-2);}
   var MONITORING_BASE_URL = 'https://core.nordex.schwarm.com/monitoring/asset/';
   var REVIEWS_PATH = FIREBASE_BASE + '/reviews.json';
   function reviewNodePath(id){ return FIREBASE_BASE + '/reviews/' + encodeURIComponent(id) + '.json'; }
+  var HISTORY_PATH = FIREBASE_BASE + '/history.json';
+  function historyNodePath(dateKey){ return FIREBASE_BASE + '/history/' + dateKey + '.json'; }
   var POLL_INTERVAL_MS = 20000;
 
   var state = {
@@ -402,7 +418,7 @@ tbody tr:hover{background:var(--panel-2);}
     parkTotalCount: 0
   };
 
-  var typeChart = null, donutChart = null;
+  var typeChart = null, donutChart = null, trendChart = null;
 
   function $(id){ return document.getElementById(id); }
 
@@ -587,6 +603,42 @@ tbody tr:hover{background:var(--panel-2);}
       if (!r.ok) throw new Error('save-failed');
       return true;
     });
+  }
+
+  function localDateKey(d){
+    d = d || new Date();
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  function saveHistorySnapshot(counts, total){
+    if (!total) return Promise.resolve();
+    var dateKey = localDateKey();
+    var ok = counts.ok || 0;
+    var snapshot = {
+      date: dateKey,
+      total: total,
+      unreachable: counts.unreachable || 0,
+      never: counts.never || 0,
+      stale: counts.stale || 0,
+      ok: ok,
+      pct: Math.round(ok / total * 1000) / 10,
+      savedAt: Date.now()
+    };
+    return fetch(historyNodePath(dateKey), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(snapshot)
+    }).catch(function(){ /* best effort — trend tracking should never block the main workflow */ });
+  }
+
+  function loadHistory(){
+    return fetch(HISTORY_PATH).then(function(r){
+      if (!r.ok) throw new Error('fetch-failed');
+      return r.json();
+    }).then(function(data){ return data || {}; }).catch(function(){ return null; });
   }
 
   function loadAll(){
@@ -824,9 +876,9 @@ tbody tr:hover{background:var(--panel-2);}
   }
 
   function statusLabel(s){
-    if (s === 'unreachable') return 'Never reachable';
-    if (s === 'never') return 'Never sent data';
-    if (s === 'stale') return 'Reachable, not sending';
+    if (s === 'unreachable') return 'Never reached';
+    if (s === 'never') return 'No data received';
+    if (s === 'stale') return 'Data outdated';
     return 'Sending data';
   }
 
@@ -949,9 +1001,9 @@ tbody tr:hover{background:var(--panel-2);}
       data: {
         labels: keys,
         datasets: [
-          { label: 'Never reachable', data: keys.map(function(k){ return groups[k].unreachable; }), backgroundColor: '#8B93A7', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 },
-          { label: 'Never sent data', data: keys.map(function(k){ return groups[k].never; }), backgroundColor: '#F2545B', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 },
-          { label: 'Reachable, not sending', data: keys.map(function(k){ return groups[k].stale; }), backgroundColor: '#F5A524', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 }
+          { label: 'Never reached', data: keys.map(function(k){ return groups[k].unreachable; }), backgroundColor: '#8B93A7', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 },
+          { label: 'No data received', data: keys.map(function(k){ return groups[k].never; }), backgroundColor: '#F2545B', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 },
+          { label: 'Data outdated', data: keys.map(function(k){ return groups[k].stale; }), backgroundColor: '#F5A524', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 }
         ]
       },
       plugins: [buildBarEndLabelPlugin(issueTotals)],
@@ -979,9 +1031,9 @@ tbody tr:hover{background:var(--panel-2);}
     });
 
     $('typeLegend').innerHTML =
-      '<span><span class="dot" style="background:#8B93A7"></span>Never reachable</span>' +
-      '<span><span class="dot" style="background:#F2545B"></span>Never sent data</span>' +
-      '<span><span class="dot" style="background:#F5A524"></span>Reachable, not sending</span>';
+      '<span><span class="dot" style="background:#8B93A7"></span>Never reached</span>' +
+      '<span><span class="dot" style="background:#F2545B"></span>No data received</span>' +
+      '<span><span class="dot" style="background:#F5A524"></span>Data outdated</span>';
 
     var ctx2 = $('statusDonut').getContext('2d');
     if (donutChart) donutChart.destroy();
@@ -989,7 +1041,7 @@ tbody tr:hover{background:var(--panel-2);}
     donutChart = new Chart(ctx2, {
       type: 'doughnut',
       data: {
-        labels: ['Never reachable', 'Never sent data', 'Reachable, not sending', 'Sending data'],
+        labels: ['Never reached', 'No data received', 'Data outdated', 'Sending data'],
         datasets: [{ data: [counts.unreachable, counts.never, counts.stale, counts.ok], backgroundColor: ['#8B93A7', '#F2545B', '#F5A524', '#34D399'], borderColor: '#121A28', borderWidth: 3 }]
       },
       plugins: [buildDonutCenterPlugin(total, 'in scope')],
@@ -1010,12 +1062,89 @@ tbody tr:hover{background:var(--panel-2);}
       return '<span><span class="dot" style="background:' + color + '"></span>' + label + ' <strong style="color:var(--text-primary);font-weight:500;">' + n.toLocaleString() + '</strong> · ' + pct(n) + '%</span>';
     };
     $('donutLegend').innerHTML =
-      legendRow('#8B93A7', 'Never reachable', counts.unreachable) +
+      legendRow('#8B93A7', 'Never reached', counts.unreachable) +
       legendRow('#F2545B', 'Never sent', counts.never) +
       legendRow('#F5A524', 'Not sending', counts.stale) +
       legendRow('#34D399', 'Sending', counts.ok);
   }
 
+  function renderTrendChart(historyMap){
+    var panel = $('trendPanel');
+    if (!historyMap){
+      panel.style.display = 'none';
+      return;
+    }
+    var dates = Object.keys(historyMap).sort();
+    if (!dates.length){
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'block';
+    $('trendCount').textContent = dates.length.toLocaleString() + ' day' + (dates.length > 1 ? 's' : '') + ' tracked';
+
+    var labels = dates.map(function(d){
+      var parts = d.split('-');
+      return parts[2] + '.' + parts[1] + '.';
+    });
+    var pctData = dates.map(function(d){ return historyMap[d].pct; });
+    var totalData = dates.map(function(d){ return historyMap[d].total; });
+
+    var ctx = $('trendChart').getContext('2d');
+    if (trendChart) trendChart.destroy();
+    trendChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: '% sending', data: pctData, yAxisID: 'yPct',
+            borderColor: '#34D399', backgroundColor: 'rgba(52,211,153,0.10)',
+            fill: true, tension: 0.25, pointRadius: 2.5, pointBackgroundColor: '#34D399', borderWidth: 2
+          },
+          {
+            label: 'Total devices', data: totalData, yAxisID: 'yTotal',
+            borderColor: '#657089', borderDash: [4, 3], pointRadius: 0,
+            fill: false, tension: 0.25, borderWidth: 1.5
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { ticks: { color: '#657089', font: { size: 11 } }, grid: { display: false } },
+          yPct: {
+            position: 'left', min: 0, max: 100,
+            ticks: { color: '#34D399', font: { size: 11 }, callback: function(v){ return v + '%'; } },
+            grid: { color: '#182131' }
+          },
+          yTotal: {
+            position: 'right', ticks: { color: '#657089', font: { size: 11 } },
+            grid: { display: false }
+          }
+        },
+        plugins: {
+          legend: {
+            display: true, position: 'top', align: 'end',
+            labels: { color: '#9AA5B8', boxWidth: 12, font: { size: 11.5 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(c){
+                if (c.dataset.yAxisID === 'yPct') return '% sending: ' + c.parsed.y + '%';
+                return 'Total devices: ' + c.parsed.y.toLocaleString();
+              },
+              footer: function(items){
+                var d = dates[items[0].dataIndex];
+                var h = historyMap[d];
+                return h.never.toLocaleString() + ' never · ' + h.stale.toLocaleString() + ' stale · ' + h.unreachable.toLocaleString() + ' unreachable';
+              }
+            }
+          }
+        }
+      }
+    });
+  }
 
   var STATUS_ORDER = { unreachable: 0, never: 1, stale: 2, ok: 3 };
 
@@ -1210,6 +1339,7 @@ tbody tr:hover{background:var(--panel-2);}
       state.page = keepPage;
       renderTable();
     });
+    loadHistory().then(function(history){ renderTrendChart(history); });
   }
 
   function renderSyncPill(){
@@ -1324,13 +1454,19 @@ tbody tr:hover{background:var(--panel-2);}
         $('emptyState').style.display = 'none';
         $('dashboard').style.display = 'block';
         $('exportBtn').style.display = 'inline-flex';
-        renderKPIs();
+        $('exportXlsxBtn').style.display = 'inline-flex';
+        var fleetCounts = renderKPIs();
         resetChartScope();
         renderCharts();
         renderScopeNote();
         applyFilters();
         showToast('Loaded ' + devices.length.toLocaleString() + ' devices from ' + files.length + ' file' + (files.length > 1 ? 's' : '') + ' — data stays in this browser tab only');
         uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
+        saveHistorySnapshot(fleetCounts, devices.length).then(function(){
+          return loadHistory();
+        }).then(function(history){
+          renderTrendChart(history);
+        });
       }).catch(function(err){
         showToast('Could not read one of the files — check they are valid exports', true);
         uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
@@ -1363,6 +1499,26 @@ tbody tr:hover{background:var(--panel-2);}
       URL.revokeObjectURL(url);
     }).finally(function(){
       exportBtn.disabled = false; exportBtn.textContent = 'Export CSV';
+    });
+  }
+
+  function exportXlsx(){
+    var btn = $('exportXlsxBtn');
+    btn.disabled = true; btn.textContent = 'Preparing…';
+    var header = ['Device','Park/segment','Type','Hardware','Status','Last ping','Last data','Checked','Checked by','Comment'];
+    Promise.all(state.filtered.map(function(d){
+      var rec = state.statusMap[d.id] || {};
+      return decryptText(rec.checkedByEnc).then(function(name){
+        return [d.fqsn, d.segment, d.deviceType, d.hardwareType, statusLabel(d.status), fmtDate(d.lastPing), fmtDate(d.lastConn), rec.checked ? 'Yes' : 'No', name, rec.comment || ''];
+      });
+    })).then(function(dataRows){
+      var ws = XLSX.utils.aoa_to_sheet([header].concat(dataRows));
+      ws['!cols'] = [{wch:16},{wch:22},{wch:14},{wch:22},{wch:16},{wch:18},{wch:18},{wch:9},{wch:16},{wch:40}];
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Fleet Signal export');
+      XLSX.writeFile(wb, 'fleet-signal-export.xlsx');
+    }).finally(function(){
+      btn.disabled = false; btn.textContent = 'Export Excel';
     });
   }
 
@@ -1491,6 +1647,7 @@ tbody tr:hover{background:var(--panel-2);}
   $('modalOverlay').addEventListener('click', function(e){ if (e.target === $('modalOverlay')) closeModal(); });
   $('modalSave').addEventListener('click', saveModal);
   $('exportBtn').addEventListener('click', exportCsv);
+  $('exportXlsxBtn').addEventListener('click', exportXlsx);
 
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape' && !$('modalOverlay').classList.contains('hidden')) closeModal();
@@ -1518,6 +1675,7 @@ tbody tr:hover{background:var(--panel-2);}
   loadAll().then(function(){
     renderSyncPill();
   });
+  loadHistory().then(function(history){ renderTrendChart(history); });
   setInterval(pollReviews, POLL_INTERVAL_MS);
 })();
 </script>

@@ -96,6 +96,19 @@ input[type=file]{display:none;}
 .chart-scope-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);}
 .chart-scope select{background:var(--panel-2);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:7px 11px;font-size:13px;font-family:var(--font-sans);max-width:240px;}
 .chart-scope select:focus{outline:none;border-color:var(--accent);}
+.park-combo{position:relative;}
+.park-combo input{background:var(--panel-2);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:7px 11px;font-size:13px;font-family:var(--font-sans);width:230px;}
+.park-combo input:focus{outline:none;border-color:var(--accent);}
+.park-combo-list{position:absolute;top:calc(100% + 4px);left:0;width:340px;max-height:320px;overflow-y:auto;background:var(--panel-2);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.45);z-index:50;}
+.park-combo-list.hidden{display:none;}
+.park-item{padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;border-bottom:1px solid var(--border);}
+.park-item:last-child{border-bottom:none;}
+.park-item:hover, .park-item.active{background:var(--bg-1, #0F1626);}
+.park-item .name{color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.park-item .stats{color:var(--text-muted);font-size:11.5px;white-space:nowrap;flex-shrink:0;}
+.park-item .stats .pct-ok{font-weight:500;}
+.park-item.all-option{font-weight:500;color:var(--accent);}
+.park-combo-empty{padding:12px;color:var(--text-muted);font-size:12.5px;text-align:center;}
 .scope-note{font-size:12px;color:var(--text-muted);margin-left:auto;}
 .btn-sm{padding:7px 12px;font-size:12.5px;}
 .legend-stack{flex-direction:column;gap:7px;}
@@ -163,7 +176,10 @@ tbody tr:hover{background:var(--panel-2);}
 .overlay.hidden{display:none;}
 .modal{background:var(--panel);border:1px solid var(--border-strong);border-radius:14px;padding:26px;width:100%;max-width:480px;}
 .modal h2{font-size:16px;margin:0 0 2px;}
-.modal .dev-id{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin:0 0 18px;word-break:break-all;}
+.modal .dev-id{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin:0 0 10px;word-break:break-all;}
+.monitoring-link{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--accent);text-decoration:none;margin-bottom:18px;}
+.monitoring-link svg{width:13px;height:13px;flex-shrink:0;}
+.monitoring-link:hover{text-decoration:underline;}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
 .field{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
 .field .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:0 0 3px;}
@@ -248,7 +264,11 @@ tbody tr:hover{background:var(--panel-2);}
       <span class="chart-scope-label">Chart scope</span>
       <select id="typeFilter"><option value="all">Type: all</option></select>
       <select id="hwFilter" disabled><option value="all">Hardware: select a type first</option></select>
-      <select id="parkFilter"><option value="all">Park: all</option></select>
+      <div class="park-combo">
+        <input type="text" id="parkSearchInput" placeholder="Park: all" autocomplete="off">
+        <div class="park-combo-list hidden" id="parkSearchList"></div>
+      </div>
+      <select id="parkFilter" style="display:none;"><option value="all">Park: all</option></select>
       <button class="btn btn-sm" id="resetScope">Reset scope</button>
       <span class="scope-note" id="scopeNote"></span>
     </div>
@@ -324,6 +344,10 @@ tbody tr:hover{background:var(--panel-2);}
   <div class="modal">
     <h2 id="modalDeviceName">Device</h2>
     <p class="dev-id" id="modalDeviceId"></p>
+    <a href="#" target="_blank" rel="noopener" class="monitoring-link" id="modalMonitoringLink">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      Open in Monitoring
+    </a>
     <div class="field-row">
       <div class="field"><p class="k">Park / segment</p><p class="v" id="modalSegment"></p></div>
       <div class="field"><p class="k">Device type</p><p class="v" id="modalType"></p></div>
@@ -353,6 +377,7 @@ tbody tr:hover{background:var(--panel-2);}
 <script>
 (function(){
   var FIREBASE_BASE = 'https://ot-monitoring-c2a4a-default-rtdb.europe-west1.firebasedatabase.app';
+  var MONITORING_BASE_URL = 'https://core.nordex.schwarm.com/monitoring/asset/';
   var REVIEWS_PATH = FIREBASE_BASE + '/reviews.json';
   function reviewNodePath(id){ return FIREBASE_BASE + '/reviews/' + encodeURIComponent(id) + '.json'; }
   var POLL_INTERVAL_MS = 20000;
@@ -369,7 +394,12 @@ tbody tr:hover{background:var(--panel-2);}
     reviewsSynced: false,
     lastName: '',
     sortKey: null,
-    sortDir: 'asc'
+    sortDir: 'asc',
+    parkOptions: [],
+    parkListMatches: [],
+    parkListShown: 0,
+    parkListQuery: '',
+    parkTotalCount: 0
   };
 
   var typeChart = null, donutChart = null;
@@ -573,46 +603,126 @@ tbody tr:hover{background:var(--panel-2);}
   }
 
   function populateTypeFilter(){
+    $('typeFilter').innerHTML = '<option value="all">Type: all</option>';
+    $('hwFilter').innerHTML = '<option value="all">Hardware: select a type first</option>';
+    $('parkFilter').innerHTML = '<option value="all">Park: all</option>';
+    refreshTypeOptions();
+    populateHwFilter();
+    refreshParkOptions();
+  }
+
+  var PARK_PAGE_SIZE = 50;
+  var PARK_SCROLL_THRESHOLD = 48;
+
+  function parkLabel(value){
+    if (value === 'all') return 'All parks (' + (state.parkTotalCount || 0).toLocaleString() + ')';
+    return value;
+  }
+
+  function setParkSelection(value, silent){
+    var psel = $('parkFilter');
+    if (psel.value !== value) psel.value = value;
+    $('parkSearchInput').value = parkLabel(value);
+    if (!silent) psel.dispatchEvent(new Event('change'));
+  }
+
+  function pctColor(pct){
+    var clamped = Math.max(0, Math.min(100, pct));
+    var hue = clamped * 1.2; // 0 = red, 60 = yellow, 120 = green
+    return 'hsl(' + hue.toFixed(0) + ', 78%, 48%)';
+  }
+
+  function parkItemHtml(p){
+    return '<div class="park-item" data-value="' + escapeHtml(p.value) + '"><span class="name">' + escapeHtml(p.value) + '</span><span class="stats"><span class="pct-ok" style="color:' + pctColor(p.pct) + '">' + p.pct + '% sending</span> · ' + p.issues + '/' + p.total + ' issues</span></div>';
+  }
+
+  function renderParkList(query){
+    var list = $('parkSearchList');
+    var q = (query || '').trim().toLowerCase();
+    var opts = state.parkOptions || [];
+    state.parkListQuery = q;
+    state.parkListMatches = q ? opts.filter(function(p){ return p.value.toLowerCase().indexOf(q) !== -1; }) : opts;
+    state.parkListShown = 0;
+
+    list.innerHTML = '';
+    if (!q || 'all parks'.indexOf(q) !== -1){
+      list.insertAdjacentHTML('beforeend', '<div class="park-item all-option" data-value="all"><span class="name">All parks</span><span class="stats">' + (state.parkTotalCount || 0).toLocaleString() + ' in scope</span></div>');
+    }
+    if (!state.parkListMatches.length){
+      list.insertAdjacentHTML('beforeend', '<div class="park-combo-empty">No park matches “' + escapeHtml(query) + '”</div>');
+    } else {
+      appendParkItems();
+    }
+    list.classList.remove('hidden');
+  }
+
+  function appendParkItems(){
+    var list = $('parkSearchList');
+    var next = state.parkListMatches.slice(state.parkListShown, state.parkListShown + PARK_PAGE_SIZE);
+    if (!next.length) return;
+    list.insertAdjacentHTML('beforeend', next.map(parkItemHtml).join(''));
+    state.parkListShown += next.length;
+  }
+
+  function hideParkList(){
+    $('parkSearchList').classList.add('hidden');
+  }
+
+  // Facet filtering: Type is scoped by Park; Hardware is scoped by Type+Park;
+  // Park is scoped by Type+Hardware. Each filter's own dimension is excluded
+  // from its own scoping pool so changing it doesn't affect its own option list.
+  function scopePool(exclude){
+    var type = $('typeFilter').value;
+    var hw = $('hwFilter').value;
+    var park = $('parkFilter').value;
+    return state.devices.filter(function(d){
+      if (exclude !== 'type' && type !== 'all' && d.deviceType !== type) return false;
+      if (exclude !== 'hw' && type !== 'all' && hw !== 'all' && d.hardwareType !== hw) return false;
+      if (exclude !== 'park' && park !== 'all' && d.segment !== park) return false;
+      return true;
+    });
+  }
+
+  function refreshTypeOptions(){
+    var pool = scopePool('type');
+    var counts = {};
+    pool.forEach(function(d){
+      counts[d.deviceType] = counts[d.deviceType] || { total: 0, issues: 0 };
+      counts[d.deviceType].total++;
+      if (d.status !== 'ok') counts[d.deviceType].issues++;
+    });
     var sel = $('typeFilter');
-    sel.innerHTML = '<option value="all">Type: all</option>';
-    state.typesList.forEach(function(t){
+    var current = sel.value;
+    var types = Object.keys(counts).sort();
+    sel.innerHTML = '<option value="all">Type: all (' + types.length + ')</option>';
+    types.forEach(function(t){
       var o = document.createElement('option');
-      o.value = t; o.textContent = 'Type: ' + t;
+      o.value = t;
+      o.textContent = 'Type: ' + t + ' — ' + counts[t].issues + '/' + counts[t].total;
       sel.appendChild(o);
     });
-    populateHwFilter();
-
-    var parkCounts = {};
-    state.devices.forEach(function(d){
-      if (!parkCounts[d.segment]) parkCounts[d.segment] = { total: 0, issues: 0 };
-      parkCounts[d.segment].total++;
-      if (d.status !== 'ok') parkCounts[d.segment].issues++;
-    });
-    var parks = Object.keys(parkCounts).sort(function(a, b){
-      var diff = parkCounts[b].issues - parkCounts[a].issues;
-      return diff !== 0 ? diff : a.localeCompare(b);
-    });
-    var psel = $('parkFilter');
-    psel.innerHTML = '<option value="all">Park: all (' + parks.length.toLocaleString() + ')</option>';
-    parks.forEach(function(p){
-      var o = document.createElement('option');
-      o.value = p;
-      o.textContent = 'Park: ' + p + ' — ' + parkCounts[p].issues + '/' + parkCounts[p].total;
-      psel.appendChild(o);
-    });
+    if (current !== 'all' && !counts[current]){
+      sel.value = 'all';
+      return true;
+    }
+    sel.value = current;
+    return false;
   }
 
   function populateHwFilter(){
     var t = $('typeFilter').value;
+    var park = $('parkFilter').value;
     var hsel = $('hwFilter');
+    var current = hsel.value;
     if (t === 'all'){
       hsel.innerHTML = '<option value="all">Hardware: select a type first</option>';
       hsel.disabled = true;
-      return;
+      return false;
     }
     var hwCounts = {};
     state.devices.forEach(function(d){
       if (d.deviceType !== t) return;
+      if (park !== 'all' && d.segment !== park) return;
       if (!hwCounts[d.hardwareType]) hwCounts[d.hardwareType] = { total: 0, issues: 0 };
       hwCounts[d.hardwareType].total++;
       if (d.status !== 'ok') hwCounts[d.hardwareType].issues++;
@@ -629,12 +739,78 @@ tbody tr:hover{background:var(--panel-2);}
       o.textContent = 'Hardware: ' + h + ' — ' + hwCounts[h].issues + '/' + hwCounts[h].total;
       hsel.appendChild(o);
     });
+    if (current !== 'all' && !hwCounts[current]){
+      hsel.value = 'all';
+      return true;
+    }
+    hsel.value = current;
+    return false;
+  }
+
+  function refreshParkOptions(){
+    var pool = scopePool('park');
+    var counts = {};
+    pool.forEach(function(d){
+      counts[d.segment] = counts[d.segment] || { total: 0, issues: 0 };
+      counts[d.segment].total++;
+      if (d.status !== 'ok') counts[d.segment].issues++;
+    });
+    var parks = Object.keys(counts).sort(function(a, b){
+      var diff = counts[b].issues - counts[a].issues;
+      return diff !== 0 ? diff : a.localeCompare(b);
+    });
+    state.parkOptions = parks.map(function(p){
+      var c = counts[p];
+      var ok = c.total - c.issues;
+      var pct = c.total ? Math.round(ok / c.total * 1000) / 10 : 0;
+      return { value: p, total: c.total, issues: c.issues, pct: pct };
+    });
+    state.parkTotalCount = parks.length;
+
+    var psel = $('parkFilter');
+    var current = psel.value;
+    psel.innerHTML = '<option value="all">Park: all (' + parks.length.toLocaleString() + ')</option>';
+    parks.forEach(function(p){
+      var o = document.createElement('option');
+      o.value = p;
+      o.textContent = 'Park: ' + p + ' — ' + counts[p].issues + '/' + counts[p].total;
+      psel.appendChild(o);
+    });
+    if (current !== 'all' && !counts[current]){
+      setParkSelection('all', true);
+      return true;
+    }
+    psel.value = current;
+    $('parkSearchInput').value = parkLabel(current);
+    return false;
+  }
+
+  function onTypeFilterChanged(){
+    $('hwFilter').value = 'all';
+    populateHwFilter();
+    refreshParkOptions();
+    renderCharts(); renderScopeNote(); applyFilters();
+  }
+
+  function onHwFilterChanged(){
+    refreshParkOptions();
+    renderCharts(); renderScopeNote(); applyFilters();
+  }
+
+  function onParkFilterChanged(){
+    var typeReset = refreshTypeOptions();
+    if (typeReset) $('hwFilter').value = 'all';
+    populateHwFilter();
+    renderCharts(); renderScopeNote(); applyFilters();
   }
 
   function resetChartScope(){
     $('typeFilter').value = 'all';
-    $('parkFilter').value = 'all';
+    $('hwFilter').value = 'all';
+    setParkSelection('all', true);
+    refreshTypeOptions();
     populateHwFilter();
+    refreshParkOptions();
   }
 
   function renderScopeNote(){
@@ -960,6 +1136,7 @@ tbody tr:hover{background:var(--panel-2);}
     state.activeDeviceId = id;
     $('modalDeviceName').textContent = d.fqsn;
     $('modalDeviceId').textContent = id;
+    $('modalMonitoringLink').href = MONITORING_BASE_URL + id.toLowerCase();
     $('modalSegment').textContent = d.segment;
     $('modalType').textContent = d.deviceType;
     $('modalHardware').textContent = d.hardwareType || '—';
@@ -1267,9 +1444,42 @@ tbody tr:hover{background:var(--panel-2);}
   });
   $('searchInput').addEventListener('input', applyFilters);
   $('statusFilter').addEventListener('change', applyFilters);
-  $('typeFilter').addEventListener('change', function(){ populateHwFilter(); renderCharts(); renderScopeNote(); applyFilters(); });
-  $('hwFilter').addEventListener('change', function(){ renderCharts(); renderScopeNote(); applyFilters(); });
-  $('parkFilter').addEventListener('change', function(){ renderCharts(); renderScopeNote(); applyFilters(); });
+  $('typeFilter').addEventListener('change', onTypeFilterChanged);
+  $('hwFilter').addEventListener('change', onHwFilterChanged);
+  $('parkFilter').addEventListener('change', onParkFilterChanged);
+
+  $('parkSearchInput').addEventListener('focus', function(e){
+    e.target.select();
+    renderParkList(e.target.value === parkLabel($('parkFilter').value) ? '' : e.target.value);
+  });
+  $('parkSearchInput').addEventListener('input', function(e){
+    renderParkList(e.target.value);
+  });
+  $('parkSearchInput').addEventListener('keydown', function(e){
+    if (e.key === 'Escape'){ e.target.blur(); hideParkList(); }
+  });
+  $('parkSearchInput').addEventListener('blur', function(){
+    setTimeout(function(){
+      hideParkList();
+      $('parkSearchInput').value = parkLabel($('parkFilter').value);
+    }, 150);
+  });
+  $('parkSearchList').addEventListener('mousedown', function(e){
+    var item = e.target.closest('.park-item');
+    if (!item) return;
+    e.preventDefault();
+    setParkSelection(item.dataset.value);
+    hideParkList();
+    $('parkSearchInput').blur();
+  });
+  $('parkSearchList').addEventListener('scroll', function(){
+    var list = this;
+    if (state.parkListShown >= state.parkListMatches.length) return;
+    if (list.scrollTop + list.clientHeight >= list.scrollHeight - PARK_SCROLL_THRESHOLD){
+      appendParkItems();
+    }
+  });
+
   $('resetScope').addEventListener('click', function(){
     resetChartScope();
     renderCharts(); renderScopeNote(); applyFilters();

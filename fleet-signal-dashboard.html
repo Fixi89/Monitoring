@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fleet Signal — Device Data Availability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root{
+  --bg-0:#080B12;
+  --bg-1:#0E141F;
+  --panel:#121A28;
+  --panel-2:#182234;
+  --border:#232F44;
+  --border-strong:#324061;
+  --text-primary:#E8ECF5;
+  --text-secondary:#9AA5B8;
+  --text-muted:#657089;
+  --accent:#4C8DFF;
+  --accent-dim:#1E2E4D;
+  --ok:#34D399;
+  --ok-dim:#0F2A22;
+  --stale:#F5A524;
+  --stale-dim:#332208;
+  --never:#F2545B;
+  --never-dim:#33121A;
+  --unreachable:#8B93A7;
+  --unreachable-dim:#242A38;
+  --radius:10px;
+  --font-sans:'Inter',-apple-system,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg-0);
+  color:var(--text-primary);
+  font-family:var(--font-sans);
+  font-size:14px;
+  line-height:1.5;
+  min-height:100vh;
+  transition:background .15s;
+}
+body.drag-active{background:#0D2A4D;}
+body.drag-active::after{
+  content:'Drop files to load';
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:22px;color:#fff;background:rgba(15,25,45,.55);z-index:999;pointer-events:none;
+
+}
+.wrap{max-width:1320px;margin:0 auto;padding:28px 28px 60px;}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:28px;flex-wrap:wrap;}
+.brand{display:flex;align-items:center;gap:12px;}
+.brand-mark{width:38px;height:38px;border-radius:9px;background:linear-gradient(160deg,var(--accent),#2C5FCC);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.brand-mark svg{width:20px;height:20px;}
+.brand h1{font-size:18px;font-weight:600;margin:0;letter-spacing:-0.01em;}
+.brand p{margin:2px 0 0;font-size:12.5px;color:var(--text-muted);font-family:var(--font-mono);}
+.top-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.meta-pill{font-size:12px;color:var(--text-secondary);font-family:var(--font-mono);background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:6px 12px;}
+.meta-pill.error{color:var(--never);border-color:var(--never);}
+button{font-family:var(--font-sans);cursor:pointer;}
+.btn{
+  background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text-primary);
+  padding:9px 16px;border-radius:8px;font-size:13.5px;font-weight:500;
+  display:inline-flex;align-items:center;gap:8px;transition:background .15s,border-color .15s;
+}
+.btn:hover{background:#1E2A40;border-color:#3E4F73;}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#0A1120;font-weight:600;}
+.btn-primary:hover{background:#639DFF;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+input[type=file]{display:none;}
+
+.empty{
+  border:1px dashed var(--border-strong);border-radius:16px;padding:70px 30px;text-align:center;
+  background:var(--panel);margin-top:40px;
+}
+.empty h2{font-size:19px;margin:18px 0 8px;font-weight:600;}
+.empty p{color:var(--text-secondary);max-width:440px;margin:0 auto 22px;font-size:13.5px;}
+
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:22px;}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;position:relative;overflow:hidden;}
+.kpi .label{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin:0 0 8px;}
+.kpi .value{font-family:var(--font-mono);font-size:28px;font-weight:600;margin:0;}
+.kpi .sub{font-size:12px;color:var(--text-secondary);margin-top:4px;}
+.kpi.never .value{color:var(--never);}
+.kpi.stale .value{color:var(--stale);}
+.kpi.ok .value{color:var(--ok);}
+
+.panels{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:22px;align-items:start;}
+.chart-scope{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;}
+.chart-scope-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);}
+.chart-scope select{background:var(--panel-2);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:7px 11px;font-size:13px;font-family:var(--font-sans);max-width:240px;}
+.chart-scope select:focus{outline:none;border-color:var(--accent);}
+.scope-note{font-size:12px;color:var(--text-muted);margin-left:auto;}
+.btn-sm{padding:7px 12px;font-size:12.5px;}
+.legend-stack{flex-direction:column;gap:7px;}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;}
+.panel h3{font-size:13px;font-weight:600;margin:0 0 4px;color:var(--text-primary);}
+.panel .hint{font-size:11.5px;color:var(--text-muted);margin:0 0 14px;}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:10px;}
+.legend span{display:inline-flex;align-items:center;gap:6px;}
+.dot{width:9px;height:9px;border-radius:2px;display:inline-block;}
+
+.controls{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;}
+.controls input[type=text],.controls select{
+  background:var(--panel-2);border:1px solid var(--border);color:var(--text-primary);
+  border-radius:8px;padding:8px 12px;font-size:13px;font-family:var(--font-sans);
+}
+.controls input[type=text]{flex:1;min-width:200px;}
+.controls select{min-width:150px;}
+.controls input:focus,.controls select:focus{outline:none;border-color:var(--accent);}
+.count-note{font-size:12px;color:var(--text-muted);margin-left:auto;white-space:nowrap;}
+
+table{width:100%;border-collapse:collapse;font-size:13px;}
+thead th{
+  text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);
+  padding:9px 12px;border-bottom:1px solid var(--border-strong);font-weight:600;position:sticky;top:0;background:var(--panel);
+}
+thead th.sortable{cursor:pointer;user-select:none;}
+thead th.sortable:hover{color:var(--text-secondary);}
+thead th.sortable::after{content:'';opacity:0;}
+thead th.sort-asc::after{content:' ↑';opacity:1;color:var(--accent);}
+thead th.sort-desc::after{content:' ↓';opacity:1;color:var(--accent);}
+.comment-flag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text-muted);margin-top:2px;}
+.comment-flag.has-comment{color:#8FB4FF;}
+.comment-flag svg{width:11px;height:11px;flex-shrink:0;}
+.comment-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#4C8DFF;vertical-align:middle;margin-left:2px;}
+.review-cell{line-height:1.35;}
+tbody td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tbody tr{cursor:pointer;transition:background .1s;}
+tbody tr:hover{background:var(--panel-2);}
+.mono{font-family:var(--font-mono);font-size:12.5px;}
+.tbl-wrap{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.tbl-scroll{max-height:560px;overflow-y:auto;}
+
+.status-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:4px 9px;border-radius:6px;white-space:nowrap;}
+.status-chip .dot{width:7px;height:7px;border-radius:50%;}
+.status-chip.never{background:var(--never-dim);color:#FF9AA0;}
+.status-chip.never .dot{background:var(--never);}
+.status-chip.stale{background:var(--stale-dim);color:#FFC670;}
+.status-chip.stale .dot{background:var(--stale);}
+.status-chip.ok{background:var(--ok-dim);color:#7EEBBE;}
+.status-chip.ok .dot{background:var(--ok);animation:pulse 2s ease-in-out infinite;}
+.status-chip.unreachable{background:var(--unreachable-dim);color:#C3C9D6;}
+.status-chip.unreachable .dot{background:var(--unreachable);}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.5);}50%{box-shadow:0 0 0 4px rgba(52,211,153,0);}}
+@media (prefers-reduced-motion:reduce){.status-chip.ok .dot{animation:none;}}
+
+.checked-badge{font-size:11.5px;color:var(--text-muted);}
+.checked-badge.yes{color:var(--ok);}
+
+.pager{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-secondary);}
+.pager button{background:var(--panel-2);border:1px solid var(--border);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:12.5px;}
+.pager button:hover:not(:disabled){border-color:var(--border-strong);}
+.pager button:disabled{opacity:.4;cursor:not-allowed;}
+
+.overlay{position:fixed;inset:0;background:rgba(4,7,14,.6);display:flex;align-items:flex-start;justify-content:center;padding:60px 20px;z-index:50;overflow-y:auto;}
+.overlay.hidden{display:none;}
+.modal{background:var(--panel);border:1px solid var(--border-strong);border-radius:14px;padding:26px;width:100%;max-width:480px;}
+.modal h2{font-size:16px;margin:0 0 2px;}
+.modal .dev-id{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin:0 0 18px;word-break:break-all;}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+.field{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+.field .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:0 0 3px;}
+.field .v{font-size:12.5px;font-family:var(--font-mono);margin:0;}
+.modal label{display:block;font-size:12px;color:var(--text-secondary);margin:14px 0 6px;font-weight:500;}
+.modal textarea,.modal input[type=text]{
+  width:100%;background:var(--panel-2);border:1px solid var(--border);color:var(--text-primary);
+  border-radius:8px;padding:10px 12px;font-size:13px;font-family:var(--font-sans);resize:vertical;
+}
+.modal textarea{min-height:80px;}
+.check-toggle{display:flex;align-items:center;gap:10px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:14px;cursor:pointer;}
+.check-toggle input{width:17px;height:17px;accent-color:var(--ok);}
+.check-toggle span{font-size:13px;font-weight:500;}
+.modal-actions{display:flex;gap:10px;margin-top:20px;justify-content:flex-end;}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text-secondary);padding:9px 16px;border-radius:8px;font-size:13px;}
+.btn-ghost:hover{border-color:var(--border-strong);color:var(--text-primary);}
+.save-note{font-size:11.5px;color:var(--text-muted);margin-top:10px;}
+
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text-primary);padding:11px 18px;border-radius:9px;font-size:13px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(-4px);}
+.toast.error{border-color:var(--never);color:#FF9AA0;}
+
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+
+@media (max-width:860px){
+  .kpis{grid-template-columns:repeat(2,1fr);}
+  .panels{grid-template-columns:1fr;}
+  .field-row{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="sr-only">Fleet Signal: device data availability dashboard for wind park monitoring equipment, with review status and comments.</h1>
+
+  <div class="top">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 17L9 8L13 14L16 9L20 15" stroke="#0A1120" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Fleet Signal</h1>
+        <p>Device data availability</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="meta-pill" id="metaPill">No data loaded</span>
+      <span class="meta-pill" id="syncPill">Connecting to review database…</span>
+      <button class="btn" id="exportBtn" style="display:none;">Export CSV</button>
+      <button class="btn btn-primary" id="uploadBtn">Update data</button>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple>
+    </div>
+  </div>
+
+  <div id="emptyState" class="empty">
+    <svg width="46" height="46" viewBox="0 0 24 24" fill="none" style="margin:0 auto;display:block;">
+      <path d="M4 17L9 8L13 14L16 9L20 15" stroke="#4C8DFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="4" cy="17" r="1.4" fill="#4C8DFF"/><circle cx="9" cy="8" r="1.4" fill="#4C8DFF"/>
+      <circle cx="13" cy="14" r="1.4" fill="#4C8DFF"/><circle cx="16" cy="9" r="1.4" fill="#4C8DFF"/><circle cx="20" cy="15" r="1.4" fill="#4C8DFF"/>
+    </svg>
+    <h2>No dataset loaded yet</h2>
+    <p>Drop your device export files here (one .csv per device type, or an .xlsx export) to see which devices in the fleet are sending data, which never have, and which have gone quiet. You can select all files at once.</p>
+    <button class="btn btn-primary" id="emptyUploadBtn">Upload data files</button>
+    <p class="hint" style="margin-top:14px;">or drag &amp; drop them anywhere on this page</p>
+  </div>
+
+  <div id="dashboard" style="display:none;">
+    <div class="kpis">
+      <div class="kpi"><p class="label">Monitored devices</p><p class="value" id="kpiTotal">0</p><p class="sub" id="kpiTotalSub">&nbsp;</p></div>
+      <div class="kpi" style="border-color:var(--unreachable);"><p class="label">Never reachable</p><p class="value" id="kpiUnreachable" style="color:var(--unreachable);">0</p><p class="sub" id="kpiUnreachableSub">&nbsp;</p></div>
+      <div class="kpi never"><p class="label">Never sent data</p><p class="value" id="kpiNever">0</p><p class="sub" id="kpiNeverSub">&nbsp;</p></div>
+      <div class="kpi stale"><p class="label">Reachable, not sending</p><p class="value" id="kpiStale">0</p><p class="sub" id="kpiStaleSub">&nbsp;</p></div>
+      <div class="kpi ok"><p class="label">Sending data</p><p class="value" id="kpiOk">0</p><p class="sub" id="kpiOkSub">&nbsp;</p></div>
+    </div>
+
+    <div class="chart-scope">
+      <span class="chart-scope-label">Chart scope</span>
+      <select id="typeFilter"><option value="all">Type: all</option></select>
+      <select id="hwFilter" disabled><option value="all">Hardware: select a type first</option></select>
+      <select id="parkFilter"><option value="all">Park: all</option></select>
+      <button class="btn btn-sm" id="resetScope">Reset scope</button>
+      <span class="scope-note" id="scopeNote"></span>
+    </div>
+
+    <div class="panels">
+      <div class="panel">
+        <h3 id="typeChartTitle">Issues by device type</h3>
+        <p class="hint" id="typeChartHint">Devices that have never been reachable, never sent data, or gone quiet — bar length is the issue count</p>
+        <div id="typeChartWrap" style="position:relative;height:260px;">
+          <canvas id="typeChart" role="img" aria-label="Horizontal stacked bar chart of device issue counts"></canvas>
+        </div>
+        <div class="legend" id="typeLegend"></div>
+      </div>
+      <div class="panel">
+        <h3>Fleet status split</h3>
+        <p class="hint">Share of devices in the current chart scope</p>
+        <div style="position:relative;height:210px;">
+          <canvas id="statusDonut" role="img" aria-label="Donut chart of the proportion of devices never reachable, never sending, reachable but not sending, and sending data"></canvas>
+        </div>
+        <div class="legend legend-stack" id="donutLegend"></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input type="text" id="searchInput" placeholder="Search device, park, ID…">
+      <select id="statusFilter">
+        <option value="issues">Status: issues only</option>
+        <option value="all">Status: all</option>
+        <option value="unreachable">Status: never reachable</option>
+        <option value="never">Status: never sent</option>
+        <option value="stale">Status: reachable, not sending</option>
+        <option value="ok">Status: sending data</option>
+      </select>
+      <select id="checkedFilter">
+        <option value="all">Review: all</option>
+        <option value="unchecked">Review: not checked</option>
+        <option value="checked">Review: checked</option>
+        <option value="commented">Review: has comment</option>
+      </select>
+      <span class="count-note" id="countNote"></span>
+    </div>
+
+    <div class="tbl-wrap">
+      <div class="tbl-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="fqsn">Device</th>
+              <th class="sortable" data-sort="segment">Park / segment</th>
+              <th class="sortable" data-sort="deviceType">Type</th>
+              <th class="sortable" data-sort="hardwareType">Hardware</th>
+              <th class="sortable" data-sort="status">Status</th>
+              <th class="sortable" data-sort="lastPing">Last ping</th>
+              <th class="sortable" data-sort="lastConn">Last data</th>
+              <th class="sortable" data-sort="review">Review</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span id="pageInfo"></span>
+        <div style="display:flex;gap:8px;">
+          <button id="prevPage">Previous</button>
+          <button id="nextPage">Next</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <h2 id="modalDeviceName">Device</h2>
+    <p class="dev-id" id="modalDeviceId"></p>
+    <div class="field-row">
+      <div class="field"><p class="k">Park / segment</p><p class="v" id="modalSegment"></p></div>
+      <div class="field"><p class="k">Device type</p><p class="v" id="modalType"></p></div>
+      <div class="field"><p class="k">Hardware type</p><p class="v" id="modalHardware"></p></div>
+      <div class="field"><p class="k">Last ping</p><p class="v" id="modalPing"></p></div>
+      <div class="field"><p class="k">Last data received</p><p class="v" id="modalConn"></p></div>
+    </div>
+    <div id="modalStatusRow"></div>
+    <label class="check-toggle" for="modalChecked">
+      <input type="checkbox" id="modalChecked">
+      <span>Mark as checked</span>
+    </label>
+    <label for="modalName">Checked by (optional)</label>
+    <input type="text" id="modalName" placeholder="Your name">
+    <label for="modalComment">Comment</label>
+    <textarea id="modalComment" placeholder="What did you find when you checked this device?"></textarea>
+    <p class="save-note" id="modalSavedNote">&nbsp;</p>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="modalCancel">Cancel</button>
+      <button class="btn btn-primary" id="modalSave">Save review</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  var FIREBASE_BASE = 'https://ot-monitoring-c2a4a-default-rtdb.europe-west1.firebasedatabase.app';
+  var REVIEWS_PATH = FIREBASE_BASE + '/reviews.json';
+  function reviewNodePath(id){ return FIREBASE_BASE + '/reviews/' + encodeURIComponent(id) + '.json'; }
+  var POLL_INTERVAL_MS = 20000;
+
+  var state = {
+    devices: [],
+    typesList: [],
+    statusMap: {},
+    meta: null,
+    filtered: [],
+    page: 1,
+    pageSize: 50,
+    activeDeviceId: null,
+    reviewsSynced: false,
+    lastName: '',
+    sortKey: null,
+    sortDir: 'asc'
+  };
+
+  var typeChart = null, donutChart = null;
+
+  function $(id){ return document.getElementById(id); }
+
+  function showToast(msg, isError){
+    var t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (isError ? ' error' : '');
+    setTimeout(function(){ t.className = 'toast'; }, 3200);
+  }
+
+  function parseDate(v){
+    if (v === undefined || v === null) return null;
+    var s = String(v).trim();
+    if (s === '') return null;
+    s = s.replace(/(\.\d{3})\d+Z$/, '$1Z');
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return d.getTime();
+  }
+
+  function fmtDate(ms){
+    if (ms === null || ms === undefined) return 'Never';
+    var d = new Date(ms);
+    return d.toISOString().slice(0,16).replace('T',' ') + ' UTC';
+  }
+
+  function boolVal(v){
+    return String(v).trim().toUpperCase() === 'TRUE';
+  }
+
+  function computeStatus(lastPing, lastConn){
+    if (lastPing === null) return 'unreachable';
+    if (lastConn === null) return 'never';
+    if ((lastPing - lastConn) > 2*24*60*60*1000) return 'stale';
+    return 'ok';
+  }
+
+  function bufToB64(buf){
+    var bin = '', bytes = new Uint8Array(buf);
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64ToBuf(b64){
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  var ENC_PASSPHRASE = 'fleet-signal-nordex-review-key';
+  var cryptoKeyPromise = null;
+  function getCryptoKey(){
+    if (!cryptoKeyPromise){
+      var raw = new TextEncoder().encode(ENC_PASSPHRASE.padEnd(32, '0').slice(0, 32));
+      cryptoKeyPromise = crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+    }
+    return cryptoKeyPromise;
+  }
+  function encryptText(text){
+    if (!text) return Promise.resolve(null);
+    return getCryptoKey().then(function(key){
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var data = new TextEncoder().encode(text);
+      return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, data).then(function(cipher){
+        return { iv: bufToB64(iv), data: bufToB64(new Uint8Array(cipher)) };
+      });
+    });
+  }
+  function decryptText(payload){
+    if (!payload || !payload.data) return Promise.resolve('');
+    return getCryptoKey().then(function(key){
+      var iv = b64ToBuf(payload.iv);
+      var data = b64ToBuf(payload.data);
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, data).then(function(plain){
+        return new TextDecoder().decode(plain);
+      });
+    }).catch(function(){ return ''; });
+  }
+
+  function formatGuid(hex){
+    if (!hex || hex.length !== 32) return hex;
+    return hex.slice(0,8) + '-' + hex.slice(8,12) + '-' + hex.slice(12,16) + '-' + hex.slice(16,20) + '-' + hex.slice(20);
+  }
+
+  function toCompact(devices){
+    var segDict = {}, segList = [];
+    var typeDict = {}, typeList = [];
+    function segIdx(s){ if (!(s in segDict)){ segDict[s] = segList.length; segList.push(s); } return segDict[s]; }
+    function typIdx(t){ if (!(t in typeDict)){ typeDict[t] = typeList.length; typeList.push(t); } return typeDict[t]; }
+    var d = devices.map(function(dev){
+      return [
+        String(dev.id).replace(/-/g, ''),
+        dev.fqsn,
+        segIdx(dev.segment),
+        typIdx(dev.deviceType),
+        dev.lastPing === null ? null : Math.round(dev.lastPing / 1000),
+        dev.lastConn === null ? null : Math.round(dev.lastConn / 1000)
+      ];
+    });
+    return { d: d, seg: segList, typ: typeList };
+  }
+
+  function fromCompact(payload){
+    var seg = payload.seg || [], typ = payload.typ || [];
+    return (payload.d || []).map(function(row){
+      var lastPing = row[4] === null || row[4] === undefined ? null : row[4] * 1000;
+      var lastConn = row[5] === null || row[5] === undefined ? null : row[5] * 1000;
+      return {
+        id: formatGuid(row[0]),
+        fqsn: row[1],
+        segment: seg[row[2]],
+        deviceType: typ[row[3]],
+        lastPing: lastPing,
+        lastConn: lastConn,
+        status: computeStatus(lastPing, lastConn)
+      };
+    });
+  }
+
+  function processRows(rows, devices, typesSet, hwSet){
+    rows.forEach(function(row){
+      var susp = row['Column1.result.IsMonitoringSuspended'];
+      var onboarded = row['Column1.result.IsOnboarded'];
+      if (boolVal(susp) === true || boolVal(onboarded) !== true) return;
+
+      var id = row['Column1.result.ComponentID_uniqueidentifier'];
+      if (!id) return;
+      var fqsn = row['Column1.componentFqsn'] || row['Column1.result.ComponentFQSN'] || id;
+      var segment = row['Column1.segment'] || '—';
+      var deviceType = row['Column1.deviceType'] || 'Unknown';
+      var hardwareType = row['Column1.result.TypeHardware'] || 'Unknown';
+
+      var snmp = parseDate(row['Column1.result.LastSnmpConnection']);
+      var prom = parseDate(row['Column1.result.LastPrometheusConnection']);
+      var lastConn = null;
+      if (snmp !== null && prom !== null) lastConn = Math.max(snmp, prom);
+      else if (snmp !== null) lastConn = snmp;
+      else if (prom !== null) lastConn = prom;
+
+      var lastPing = parseDate(row['Column1.result.LastPingSuccesful']);
+      var status = computeStatus(lastPing, lastConn);
+
+      typesSet[deviceType] = true;
+      hwSet[deviceType] = hwSet[deviceType] || {};
+      hwSet[deviceType][hardwareType] = true;
+      devices.push({ id: id, fqsn: fqsn, segment: segment, deviceType: deviceType, hardwareType: hardwareType, lastPing: lastPing, lastConn: lastConn, status: status });
+    });
+  }
+
+  function processWorkbook(wb){
+    var devices = [], typesSet = {}, hwSet = {};
+    wb.SheetNames.forEach(function(sheetName){
+      var ws = wb.Sheets[sheetName];
+      var rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      processRows(rows, devices, typesSet, hwSet);
+    });
+    return { devices: devices, types: Object.keys(typesSet).sort(), hwByType: hwSet };
+  }
+
+  function processCsvText(text, devices, typesSet, hwSet){
+    var wb = XLSX.read(text, { type: 'string' });
+    var ws = wb.Sheets[wb.SheetNames[0]];
+    var rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    processRows(rows, devices, typesSet, hwSet);
+  }
+
+  function buildMeta(devices, types, fileName){
+    return { uploadedAt: Date.now(), fileName: fileName || 'upload', count: devices.length, types: types };
+  }
+
+  function loadStatusMap(){
+    return fetch(REVIEWS_PATH).then(function(r){
+      if (!r.ok) throw new Error('fetch-failed');
+      return r.json();
+    }).then(function(data){ return data || {}; }).catch(function(){ return null; });
+  }
+
+  function saveDeviceReview(id, rec){
+    return fetch(reviewNodePath(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rec)
+    }).then(function(r){
+      if (!r.ok) throw new Error('save-failed');
+      return true;
+    });
+  }
+
+  function loadAll(){
+    return loadStatusMap().then(function(map){
+      state.statusMap = map || {};
+      state.reviewsSynced = map !== null;
+    });
+  }
+
+  function renderMetaPill(){
+    if (!state.meta){ $('metaPill').textContent = 'No data loaded'; return; }
+    var d = new Date(state.meta.uploadedAt);
+    $('metaPill').textContent = 'Loaded ' + d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + ' · ' + state.meta.count.toLocaleString() + ' devices (local only)';
+  }
+
+  function populateTypeFilter(){
+    var sel = $('typeFilter');
+    sel.innerHTML = '<option value="all">Type: all</option>';
+    state.typesList.forEach(function(t){
+      var o = document.createElement('option');
+      o.value = t; o.textContent = 'Type: ' + t;
+      sel.appendChild(o);
+    });
+    populateHwFilter();
+
+    var parkCounts = {};
+    state.devices.forEach(function(d){
+      if (!parkCounts[d.segment]) parkCounts[d.segment] = { total: 0, issues: 0 };
+      parkCounts[d.segment].total++;
+      if (d.status !== 'ok') parkCounts[d.segment].issues++;
+    });
+    var parks = Object.keys(parkCounts).sort(function(a, b){
+      var diff = parkCounts[b].issues - parkCounts[a].issues;
+      return diff !== 0 ? diff : a.localeCompare(b);
+    });
+    var psel = $('parkFilter');
+    psel.innerHTML = '<option value="all">Park: all (' + parks.length.toLocaleString() + ')</option>';
+    parks.forEach(function(p){
+      var o = document.createElement('option');
+      o.value = p;
+      o.textContent = 'Park: ' + p + ' — ' + parkCounts[p].issues + '/' + parkCounts[p].total;
+      psel.appendChild(o);
+    });
+  }
+
+  function populateHwFilter(){
+    var t = $('typeFilter').value;
+    var hsel = $('hwFilter');
+    if (t === 'all'){
+      hsel.innerHTML = '<option value="all">Hardware: select a type first</option>';
+      hsel.disabled = true;
+      return;
+    }
+    var hwCounts = {};
+    state.devices.forEach(function(d){
+      if (d.deviceType !== t) return;
+      if (!hwCounts[d.hardwareType]) hwCounts[d.hardwareType] = { total: 0, issues: 0 };
+      hwCounts[d.hardwareType].total++;
+      if (d.status !== 'ok') hwCounts[d.hardwareType].issues++;
+    });
+    var hws = Object.keys(hwCounts).sort(function(a, b){
+      var diff = hwCounts[b].issues - hwCounts[a].issues;
+      return diff !== 0 ? diff : a.localeCompare(b);
+    });
+    hsel.disabled = false;
+    hsel.innerHTML = '<option value="all">Hardware: all (' + hws.length + ')</option>';
+    hws.forEach(function(h){
+      var o = document.createElement('option');
+      o.value = h;
+      o.textContent = 'Hardware: ' + h + ' — ' + hwCounts[h].issues + '/' + hwCounts[h].total;
+      hsel.appendChild(o);
+    });
+  }
+
+  function resetChartScope(){
+    $('typeFilter').value = 'all';
+    $('parkFilter').value = 'all';
+    populateHwFilter();
+  }
+
+  function renderScopeNote(){
+    var t = $('typeFilter').value, p = $('parkFilter').value;
+    var n = getChartDevices().length;
+    if (t === 'all' && p === 'all'){
+      $('scopeNote').textContent = 'Showing all ' + n.toLocaleString() + ' devices';
+    } else {
+      $('scopeNote').textContent = 'Scoped to ' + n.toLocaleString() + ' devices';
+    }
+  }
+
+  function statusLabel(s){
+    if (s === 'unreachable') return 'Never reachable';
+    if (s === 'never') return 'Never sent data';
+    if (s === 'stale') return 'Reachable, not sending';
+    return 'Sending data';
+  }
+
+  function computeCounts(deviceList){
+    var counts = { unreachable: 0, never: 0, stale: 0, ok: 0 };
+    deviceList.forEach(function(d){ counts[d.status] = (counts[d.status] || 0) + 1; });
+    return counts;
+  }
+
+  function renderKPIs(){
+    var total = state.devices.length;
+    var counts = computeCounts(state.devices);
+    var unreachable = counts.unreachable, never = counts.never, stale = counts.stale, ok = counts.ok;
+    $('kpiTotal').textContent = total.toLocaleString();
+    $('kpiUnreachable').textContent = unreachable.toLocaleString();
+    $('kpiNever').textContent = never.toLocaleString();
+    $('kpiStale').textContent = stale.toLocaleString();
+    $('kpiOk').textContent = ok.toLocaleString();
+    $('kpiUnreachableSub').textContent = total ? (Math.round(unreachable/total*1000)/10) + '% of fleet' : '';
+    $('kpiNeverSub').textContent = total ? (Math.round(never/total*1000)/10) + '% of fleet' : '';
+    $('kpiStaleSub').textContent = total ? (Math.round(stale/total*1000)/10) + '% of fleet' : '';
+    $('kpiOkSub').textContent = total ? (Math.round(ok/total*1000)/10) + '% of fleet' : '';
+    var checkedIssues = 0, totalIssues = unreachable + never + stale;
+    state.devices.forEach(function(d){
+      if (d.status === 'ok') return;
+      var rec = state.statusMap[d.id];
+      if (rec && rec.checked) checkedIssues++;
+    });
+    $('kpiTotalSub').textContent = totalIssues.toLocaleString() + ' need review · ' + checkedIssues.toLocaleString() + ' checked';
+    return counts;
+  }
+
+  function buildBarEndLabelPlugin(issueTotals){
+    return {
+      id: 'barEndLabels',
+      afterDatasetsDraw: function(chart){
+        var ctx = chart.ctx;
+        var meta = chart.getDatasetMeta(chart.data.datasets.length - 1);
+        ctx.save();
+        ctx.fillStyle = '#C3C9D6';
+        ctx.font = '500 11px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        meta.data.forEach(function(bar, idx){
+          if (issueTotals[idx] === undefined || issueTotals[idx] === 0) return;
+          ctx.fillText(issueTotals[idx].toLocaleString(), bar.x + 6, bar.y);
+        });
+        ctx.restore();
+      }
+    };
+  }
+
+  function buildDonutCenterPlugin(total, label){
+    return {
+      id: 'donutCenter',
+      afterDraw: function(chart){
+        var ctx = chart.ctx;
+        var area = chart.chartArea;
+        if (!area) return;
+        var cx = (area.left + area.right) / 2;
+        var cy = (area.top + area.bottom) / 2;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#E8ECF5';
+        ctx.font = '500 22px Inter, sans-serif';
+        ctx.fillText(total.toLocaleString(), cx, cy + 2);
+        ctx.fillStyle = '#657089';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.fillText(label, cx, cy + 20);
+        ctx.restore();
+      }
+    };
+  }
+
+  function getChartDevices(){
+    var t = $('typeFilter').value;
+    var h = $('hwFilter').value;
+    var p = $('parkFilter').value;
+    return state.devices.filter(function(d){
+      if (t !== 'all' && d.deviceType !== t) return false;
+      if (t !== 'all' && h !== 'all' && d.hardwareType !== h) return false;
+      if (p !== 'all' && d.segment !== p) return false;
+      return true;
+    });
+  }
+
+  function renderCharts(){
+    var chartDevices = getChartDevices();
+    var counts = computeCounts(chartDevices);
+    var selectedType = $('typeFilter').value;
+    var byHardware = selectedType !== 'all';
+
+    var groups = {};
+    chartDevices.forEach(function(d){
+      var key = byHardware ? (d.hardwareType || 'Unknown') : d.deviceType;
+      groups[key] = groups[key] || { unreachable: 0, never: 0, stale: 0, ok: 0, total: 0 };
+      groups[key][d.status]++;
+      groups[key].total++;
+    });
+    var keys = Object.keys(groups).sort(function(a,b){
+      var ta = groups[a].unreachable + groups[a].never + groups[a].stale;
+      var tb = groups[b].unreachable + groups[b].never + groups[b].stale;
+      return ta - tb;
+    });
+    var issueTotals = keys.map(function(k){
+      var c = groups[k];
+      return c.unreachable + c.never + c.stale;
+    });
+
+    $('typeChartTitle').textContent = byHardware ? 'Issues by hardware type — ' + selectedType : 'Issues by device type';
+    $('typeChartHint').textContent = byHardware
+      ? 'Hardware variants within ' + selectedType + ' · bar length is the issue count, total device count on hover'
+      : 'Bar length is the issue count · total device count on hover';
+    $('typeChartWrap').style.height = Math.max(200, keys.length * 32 + 40) + 'px';
+
+    var ctx1 = $('typeChart').getContext('2d');
+    if (typeChart) typeChart.destroy();
+    typeChart = new Chart(ctx1, {
+      type: 'bar',
+      data: {
+        labels: keys,
+        datasets: [
+          { label: 'Never reachable', data: keys.map(function(k){ return groups[k].unreachable; }), backgroundColor: '#8B93A7', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 },
+          { label: 'Never sent data', data: keys.map(function(k){ return groups[k].never; }), backgroundColor: '#F2545B', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 },
+          { label: 'Reachable, not sending', data: keys.map(function(k){ return groups[k].stale; }), backgroundColor: '#F5A524', borderRadius: 2, barPercentage: 0.62, categoryPercentage: 0.8 }
+        ]
+      },
+      plugins: [buildBarEndLabelPlugin(issueTotals)],
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { right: 42, top: 4 } },
+        scales: {
+          x: { stacked: true, ticks: { color: '#657089', font: { size: 11 }, precision: 0 }, grid: { color: '#182131' }, border: { display: false } },
+          y: { stacked: true, ticks: { color: '#C3C9D6', font: { size: 12 } }, grid: { display: false }, border: { display: false } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(c){ return c.dataset.label + ': ' + c.parsed.x.toLocaleString(); },
+              footer: function(items){
+                var k = keys[items[0].dataIndex];
+                return groups[k].total.toLocaleString() + ' devices total in this row';
+              }
+            }
+          }
+        }
+      }
+    });
+
+    $('typeLegend').innerHTML =
+      '<span><span class="dot" style="background:#8B93A7"></span>Never reachable</span>' +
+      '<span><span class="dot" style="background:#F2545B"></span>Never sent data</span>' +
+      '<span><span class="dot" style="background:#F5A524"></span>Reachable, not sending</span>';
+
+    var ctx2 = $('statusDonut').getContext('2d');
+    if (donutChart) donutChart.destroy();
+    var total = counts.unreachable + counts.never + counts.stale + counts.ok;
+    donutChart = new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: ['Never reachable', 'Never sent data', 'Reachable, not sending', 'Sending data'],
+        datasets: [{ data: [counts.unreachable, counts.never, counts.stale, counts.ok], backgroundColor: ['#8B93A7', '#F2545B', '#F5A524', '#34D399'], borderColor: '#121A28', borderWidth: 3 }]
+      },
+      plugins: [buildDonutCenterPlugin(total, 'in scope')],
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '70%',
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function(c){
+            var p = total ? Math.round(c.parsed / total * 1000) / 10 : 0;
+            return c.label + ': ' + c.parsed.toLocaleString() + ' (' + p + '%)';
+          } } }
+        }
+      }
+    });
+
+    var pct = function(n){ return total ? Math.round(n/total*1000)/10 : 0; };
+    var legendRow = function(color, label, n){
+      return '<span><span class="dot" style="background:' + color + '"></span>' + label + ' <strong style="color:var(--text-primary);font-weight:500;">' + n.toLocaleString() + '</strong> · ' + pct(n) + '%</span>';
+    };
+    $('donutLegend').innerHTML =
+      legendRow('#8B93A7', 'Never reachable', counts.unreachable) +
+      legendRow('#F2545B', 'Never sent', counts.never) +
+      legendRow('#F5A524', 'Not sending', counts.stale) +
+      legendRow('#34D399', 'Sending', counts.ok);
+  }
+
+
+  var STATUS_ORDER = { unreachable: 0, never: 1, stale: 2, ok: 3 };
+
+  function sortFiltered(){
+    var key = state.sortKey, dir = state.sortDir === 'desc' ? -1 : 1;
+    if (!key) return;
+    var map = state.statusMap;
+    state.filtered.sort(function(a, b){
+      var va, vb;
+      if (key === 'status'){ va = STATUS_ORDER[a.status]; vb = STATUS_ORDER[b.status]; }
+      else if (key === 'review'){
+        var ra = map[a.id], rb = map[b.id];
+        va = (ra && ra.checked ? 2 : 0) + (ra && ra.comment ? 1 : 0);
+        vb = (rb && rb.checked ? 2 : 0) + (rb && rb.comment ? 1 : 0);
+      }
+      else if (key === 'lastPing' || key === 'lastConn'){
+        va = a[key] === null ? -1 : a[key];
+        vb = b[key] === null ? -1 : b[key];
+      }
+      else { va = String(a[key] || '').toLowerCase(); vb = String(b[key] || '').toLowerCase(); }
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+  }
+
+  function renderSortIndicators(){
+    var ths = document.querySelectorAll('thead th.sortable');
+    for (var i = 0; i < ths.length; i++){
+      ths[i].classList.remove('sort-asc', 'sort-desc');
+      if (ths[i].dataset.sort === state.sortKey){
+        ths[i].classList.add(state.sortDir === 'desc' ? 'sort-desc' : 'sort-asc');
+      }
+    }
+  }
+
+  function applyFilters(){
+    var q = $('searchInput').value.trim().toLowerCase();
+    var statusF = $('statusFilter').value;
+    var typeF = $('typeFilter').value;
+    var hwF = $('hwFilter').value;
+    var parkF = $('parkFilter').value;
+    var checkedF = $('checkedFilter').value;
+
+    state.filtered = state.devices.filter(function(d){
+      if (statusF === 'issues' && d.status === 'ok') return false;
+      if (statusF !== 'all' && statusF !== 'issues' && d.status !== statusF) return false;
+      if (typeF !== 'all' && d.deviceType !== typeF) return false;
+      if (typeF !== 'all' && hwF !== 'all' && d.hardwareType !== hwF) return false;
+      if (parkF !== 'all' && d.segment !== parkF) return false;
+      var rec = state.statusMap[d.id];
+      var checked = !!(rec && rec.checked);
+      if (checkedF === 'checked' && !checked) return false;
+      if (checkedF === 'unchecked' && checked) return false;
+      if (checkedF === 'commented' && !(rec && rec.comment)) return false;
+      if (q){
+        var hay = (d.fqsn + ' ' + d.segment + ' ' + d.deviceType + ' ' + d.hardwareType + ' ' + d.id).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+    sortFiltered();
+    state.page = 1;
+    renderTable();
+  }
+
+  var COMMENT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+
+  function renderTable(){
+    var totalRows = state.filtered.length;
+    var totalPages = Math.max(1, Math.ceil(totalRows / state.pageSize));
+    if (state.page > totalPages) state.page = totalPages;
+    var start = (state.page - 1) * state.pageSize;
+    var pageRows = state.filtered.slice(start, start + state.pageSize);
+
+    var body = $('tableBody');
+    body.innerHTML = '';
+    pageRows.forEach(function(d){
+      var tr = document.createElement('tr');
+      tr.dataset.id = d.id;
+      var rec = state.statusMap[d.id];
+      var checked = rec && rec.checked;
+      var comment = rec && rec.comment ? rec.comment : '';
+      var reviewCell = '<span class="checked-badge ' + (checked ? 'yes' : '') + '">' + (checked ? 'Checked' : 'Not checked') + '</span>';
+      if (comment){
+        var short = comment.length > 42 ? comment.slice(0, 42) + '…' : comment;
+        reviewCell += '<div class="comment-flag has-comment" title="' + escapeHtml(comment) + '">' + COMMENT_ICON + escapeHtml(short) + '</div>';
+      }
+      tr.innerHTML =
+        '<td class="mono">' + escapeHtml(d.fqsn) + (comment ? ' <span class="comment-dot" title="Has a comment"></span>' : '') + '</td>' +
+        '<td>' + escapeHtml(d.segment) + '</td>' +
+        '<td>' + escapeHtml(d.deviceType) + '</td>' +
+        '<td>' + escapeHtml(d.hardwareType || '—') + '</td>' +
+        '<td><span class="status-chip ' + d.status + '"><span class="dot"></span>' + statusLabel(d.status) + '</span></td>' +
+        '<td class="mono">' + fmtDate(d.lastPing) + '</td>' +
+        '<td class="mono">' + fmtDate(d.lastConn) + '</td>' +
+        '<td class="review-cell">' + reviewCell + '</td>';
+      tr.addEventListener('click', function(){ openModal(d.id); });
+      body.appendChild(tr);
+    });
+
+    $('countNote').textContent = totalRows.toLocaleString() + ' devices match';
+    $('pageInfo').textContent = 'Page ' + state.page + ' of ' + totalPages + ' (' + totalRows.toLocaleString() + ' rows)';
+    $('prevPage').disabled = state.page <= 1;
+    $('nextPage').disabled = state.page >= totalPages;
+    renderSortIndicators();
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+
+  function openModal(id){
+    var d = state.devices.find(function(x){ return x.id === id; });
+    if (!d) return;
+    state.activeDeviceId = id;
+    $('modalDeviceName').textContent = d.fqsn;
+    $('modalDeviceId').textContent = id;
+    $('modalSegment').textContent = d.segment;
+    $('modalType').textContent = d.deviceType;
+    $('modalHardware').textContent = d.hardwareType || '—';
+    $('modalPing').textContent = fmtDate(d.lastPing);
+    $('modalConn').textContent = fmtDate(d.lastConn);
+    $('modalStatusRow').innerHTML = '<span class="status-chip ' + d.status + '"><span class="dot"></span>' + statusLabel(d.status) + '</span>';
+    var rec = state.statusMap[id] || {};
+    $('modalChecked').checked = !!rec.checked;
+    $('modalComment').value = rec.comment || '';
+    $('modalName').value = state.lastName || '';
+    $('modalSavedNote').textContent = rec.checkedAt ? 'Last saved ' + fmtDate(rec.checkedAt) + ' by …' : '';
+    $('modalOverlay').classList.remove('hidden');
+    if (rec.checkedByEnc){
+      decryptText(rec.checkedByEnc).then(function(name){
+        if (state.activeDeviceId !== id) return;
+        if (name){
+          $('modalName').value = name;
+          $('modalSavedNote').textContent = rec.checkedAt ? 'Last saved ' + fmtDate(rec.checkedAt) + ' by ' + name : '';
+        }
+      });
+    }
+  }
+
+  function closeModal(){
+    $('modalOverlay').classList.add('hidden');
+    state.activeDeviceId = null;
+  }
+
+  function saveModal(){
+    var id = state.activeDeviceId;
+    if (!id) return;
+    var checked = $('modalChecked').checked;
+    var comment = $('modalComment').value.trim();
+    var name = $('modalName').value.trim();
+    var previous = state.statusMap[id];
+    var btn = $('modalSave');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    encryptText(name).then(function(encName){
+      var rec = { checked: checked, comment: comment, checkedByEnc: encName, checkedAt: Date.now() };
+      state.statusMap[id] = rec;
+      state.lastName = name;
+      return saveDeviceReview(id, rec);
+    }).then(function(){
+      showToast('Review saved — synced with team');
+      closeModal();
+      renderKPIs();
+      applyFilters();
+    }).catch(function(){
+      state.statusMap[id] = previous;
+      showToast('Could not reach the shared database — check your connection and try again', true);
+    }).finally(function(){
+      btn.disabled = false; btn.textContent = 'Save review';
+    });
+  }
+
+  function pollReviews(){
+    if (!$('modalOverlay').classList.contains('hidden')) return;
+    loadStatusMap().then(function(map){
+      if (map === null){
+        state.reviewsSynced = false;
+        renderSyncPill();
+        return;
+      }
+      state.statusMap = map;
+      state.reviewsSynced = true;
+      renderSyncPill();
+      if (!state.devices.length) return;
+      var keepPage = state.page;
+      renderKPIs();
+      applyFilters();
+      state.page = keepPage;
+      renderTable();
+    });
+  }
+
+  function renderSyncPill(){
+    var el = $('syncPill');
+    if (!el) return;
+    if (state.reviewsSynced){
+      el.textContent = 'Reviews synced · ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      el.classList.remove('error');
+    } else {
+      el.textContent = 'Reviews offline — check connection';
+      el.classList.add('error');
+    }
+  }
+
+  function readFileAsText(file){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(e){ resolve(e.target.result); };
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+  }
+
+  function readFileAsArrayBuffer(file){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(e){ resolve(e.target.result); };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  function handleFiles(fileList){
+    var files = Array.prototype.slice.call(fileList);
+    if (!files.length) return;
+    var uploadBtn = $('uploadBtn');
+    uploadBtn.disabled = true; uploadBtn.textContent = 'Processing ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '…';
+
+    var devices = [], typesSet = {}, hwSet = {};
+    var tasks = files.map(function(file){
+      var isCsv = /\.csv$/i.test(file.name);
+      if (isCsv){
+        return readFileAsText(file).then(function(text){
+          processCsvText(text, devices, typesSet, hwSet);
+        });
+      }
+      return readFileAsArrayBuffer(file).then(function(buf){
+        var wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false });
+        wb.SheetNames.forEach(function(sheetName){
+          var ws = wb.Sheets[sheetName];
+          var rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          processRows(rows, devices, typesSet, hwSet);
+        });
+      });
+    });
+
+    Promise.all(tasks).then(function(){
+      if (!devices.length){
+        showToast('No matching devices found in the selected file(s)', true);
+        uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
+        return;
+      }
+      var types = Object.keys(typesSet).sort();
+      state.devices = devices;
+      state.typesList = types;
+      state.hwByType = hwSet;
+      state.meta = buildMeta(devices, types, files.length === 1 ? files[0].name : files.length + ' files');
+      renderMetaPill();
+      populateTypeFilter();
+      $('emptyState').style.display = 'none';
+      $('dashboard').style.display = 'block';
+      $('exportBtn').style.display = 'inline-flex';
+      renderKPIs();
+      resetChartScope();
+      renderCharts();
+      renderScopeNote();
+      applyFilters();
+      showToast('Loaded ' + devices.length.toLocaleString() + ' devices from ' + files.length + ' file' + (files.length > 1 ? 's' : '') + ' — data stays in this browser tab only');
+      uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
+    }).catch(function(err){
+      showToast('Could not read one of the files — check they are valid exports', true);
+      uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
+    });
+  }
+
+  function exportCsv(){
+    var exportBtn = $('exportBtn');
+    exportBtn.disabled = true; exportBtn.textContent = 'Preparing…';
+    var rows = [['Device','Park/segment','Type','Hardware','Status','LastPing','LastData','Checked','CheckedBy','Comment']];
+    Promise.all(state.filtered.map(function(d){
+      var rec = state.statusMap[d.id] || {};
+      return decryptText(rec.checkedByEnc).then(function(name){
+        return [d.fqsn, d.segment, d.deviceType, d.hardwareType, statusLabel(d.status), fmtDate(d.lastPing), fmtDate(d.lastConn), rec.checked ? 'Yes' : 'No', name, (rec.comment || '').replace(/\n/g,' ')];
+      });
+    })).then(function(dataRows){
+      rows = rows.concat(dataRows);
+      var csv = rows.map(function(r){
+        return r.map(function(c){ return '"' + String(c).replace(/"/g,'""') + '"'; }).join(',');
+      }).join('\n');
+      var blob = new Blob([csv], { type: 'text/csv' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = 'fleet-signal-export.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }).finally(function(){
+      exportBtn.disabled = false; exportBtn.textContent = 'Export CSV';
+    });
+  }
+
+  $('uploadBtn').addEventListener('click', function(){ $('fileInput').click(); });
+  $('emptyUploadBtn').addEventListener('click', function(){ $('fileInput').click(); });
+  $('fileInput').addEventListener('change', function(e){
+    if (e.target.files && e.target.files.length) handleFiles(e.target.files);
+    e.target.value = '';
+  });
+  ['dragenter','dragover'].forEach(function(evt){
+    document.addEventListener(evt, function(e){ e.preventDefault(); document.body.classList.add('drag-active'); });
+  });
+  ['dragleave','drop'].forEach(function(evt){
+    document.addEventListener(evt, function(e){
+      if (evt === 'dragleave' && e.target !== document.documentElement) return;
+      document.body.classList.remove('drag-active');
+    });
+  });
+  document.addEventListener('drop', function(e){
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length){
+      handleFiles(e.dataTransfer.files);
+    }
+  });
+  $('searchInput').addEventListener('input', applyFilters);
+  $('statusFilter').addEventListener('change', applyFilters);
+  $('typeFilter').addEventListener('change', function(){ populateHwFilter(); renderCharts(); renderScopeNote(); applyFilters(); });
+  $('hwFilter').addEventListener('change', function(){ renderCharts(); renderScopeNote(); applyFilters(); });
+  $('parkFilter').addEventListener('change', function(){ renderCharts(); renderScopeNote(); applyFilters(); });
+  $('resetScope').addEventListener('click', function(){
+    resetChartScope();
+    renderCharts(); renderScopeNote(); applyFilters();
+  });
+  $('checkedFilter').addEventListener('change', applyFilters);
+  $('prevPage').addEventListener('click', function(){ if (state.page > 1){ state.page--; renderTable(); window.scrollTo({ top: document.querySelector('.tbl-wrap').offsetTop - 20, behavior: 'smooth' }); } });
+  $('nextPage').addEventListener('click', function(){ state.page++; renderTable(); window.scrollTo({ top: document.querySelector('.tbl-wrap').offsetTop - 20, behavior: 'smooth' }); });
+  $('modalCancel').addEventListener('click', closeModal);
+  $('modalOverlay').addEventListener('click', function(e){ if (e.target === $('modalOverlay')) closeModal(); });
+  $('modalSave').addEventListener('click', saveModal);
+  $('exportBtn').addEventListener('click', exportCsv);
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && !$('modalOverlay').classList.contains('hidden')) closeModal();
+  });
+
+  var sortHeaders = document.querySelectorAll('thead th.sortable');
+  for (var si = 0; si < sortHeaders.length; si++){
+    (function(th){
+      th.addEventListener('click', function(){
+        var key = th.dataset.sort;
+        if (state.sortKey === key){
+          state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.sortKey = key;
+          state.sortDir = (key === 'lastPing' || key === 'lastConn') ? 'asc' : 'asc';
+        }
+        sortFiltered();
+        state.page = 1;
+        renderTable();
+      });
+    })(sortHeaders[si]);
+  }
+
+  renderMetaPill();
+  loadAll().then(function(){
+    renderSyncPill();
+  });
+  setInterval(pollReviews, POLL_INTERVAL_MS);
+})();
+</script>
+</body>
+</html>

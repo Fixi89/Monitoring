@@ -229,7 +229,7 @@ input[type=file]{display:none;}
 .panels{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:22px;align-items:stretch;}
 .chart-scope{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;background:var(--panel-tint);box-shadow:var(--card-shadow);border-radius:var(--radius-card);padding:10px 14px;}
 .chart-scope-label{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.10em;color:var(--text-muted);}
-.chart-scope select{background:var(--panel-2);box-shadow:var(--edge);border:none;color:var(--text-input);border-radius:var(--radius-input);padding:7px 11px;font-size:13px;font-family:var(--font-sans);max-width:240px;}
+.chart-scope select{background:var(--panel-2);box-shadow:var(--edge);border:none;color:var(--text-input);border-radius:var(--radius-input);padding:7px 11px;font-size:13px;font-family:var(--font-sans);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .chart-scope select:focus{outline:none;box-shadow:var(--edge-strong);}
 .park-combo{position:relative;}
 .park-combo input{background:var(--panel-2);box-shadow:var(--edge);border:none;color:var(--text-input);border-radius:var(--radius-input);padding:7px 11px;font-size:13px;font-family:var(--font-sans);width:230px;}
@@ -265,7 +265,6 @@ input[type=file]{display:none;}
   flex:0 1 auto;min-width:150px;max-width:200px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.controls select#firmwareFilter{max-width:180px;}
 .controls input:focus,.controls select:focus{outline:none;box-shadow:var(--edge-strong);}
 .count-note{font-size:12px;color:var(--text-muted);margin-left:auto;white-space:nowrap;}
 
@@ -439,6 +438,7 @@ tbody tr:hover{background:var(--panel-2);}
         <div class="park-combo-list hidden" id="parkSearchList"></div>
       </div>
       <select id="parkFilter" style="display:none;"><option value="all">Park: all</option></select>
+      <select id="firmwareFilter"><option value="all">Firmware: all</option></select>
       <button class="btn btn-sm" id="resetScope">Reset scope</button>
       <span class="scope-note" id="scopeNote"></span>
     </div>
@@ -481,9 +481,6 @@ tbody tr:hover{background:var(--panel-2);}
         <option value="unchecked">Review: not checked</option>
         <option value="checked">Review: checked</option>
         <option value="commented">Review: has comment</option>
-      </select>
-      <select id="firmwareFilter">
-        <option value="all">Firmware: all</option>
       </select>
       <span class="count-note" id="countNote"></span>
     </div>
@@ -908,48 +905,16 @@ tbody tr:hover{background:var(--panel-2);}
     refreshFirmwareOptions();
   }
 
-  // Everything the Firmware dropdown should be scoped by, mirroring the same
-  // conditions applyFilters() uses for every other active filter — but never
-  // the firmware selection itself, so its own option list doesn't collapse
-  // onto whatever is currently chosen.
-  function firmwareScopePool(){
-    var q = $('searchInput').value.trim().toLowerCase();
-    var statusF = $('statusFilter').value;
-    var typeF = $('typeFilter').value;
-    var hwF = $('hwFilter').value;
-    var parkF = $('parkFilter').value;
-    var checkedF = $('checkedFilter').value;
-    return state.devices.filter(function(d){
-      if (statusF === 'issues' && d.status === 'ok') return false;
-      if (statusF !== 'all' && statusF !== 'issues' && d.status !== statusF) return false;
-      if (typeF !== 'all' && d.deviceType !== typeF) return false;
-      if (typeF !== 'all' && hwF !== 'all' && d.hardwareType !== hwF) return false;
-      if (parkF !== 'all' && d.segment !== parkF) return false;
-      var rec = state.statusMap[d.id];
-      var checked = !!(rec && rec.checked);
-      if (checkedF === 'checked' && !checked) return false;
-      if (checkedF === 'unchecked' && checked) return false;
-      if (checkedF === 'commented' && !(rec && rec.comment)) return false;
-      if (q){
-        var hay = (d.fqsn + ' ' + d.segment + ' ' + d.deviceType + ' ' + d.hardwareType + ' ' + d.firmwareVersion + ' ' + d.id).toLowerCase();
-        if (hay.indexOf(q) === -1) return false;
-      }
-      return true;
-    });
-  }
-
-  // Firmware is a plain table filter (like Review), not a chart-scoping facet like
-  // Type/Hardware/Park — it isn't tracked in Firebase history, so it only narrows
-  // the table, not the charts. Its own option list, though, reacts to every other
-  // active filter (status, review, type/hardware/park scope, search) the same way
-  // Hardware reacts to Type: only firmware versions that actually occur within the
-  // current scope are listed, and a selection that falls out of scope resets to
-  // 'all' rather than silently filtering everything out. 'Unknown' (rows missing
-  // the column) always sorts last.
+  // Firmware is now a chart-scoping facet alongside Type/Hardware/Park: it narrows
+  // the two charts and mutually restricts (and is restricted by) the other three via
+  // scopePool(), the same mechanism Park already uses. It is NOT tracked in Firebase
+  // history, so — like Hardware/Park already do for the trend chart — it has no effect
+  // there; see renderTrendChart()'s hint text. 'Unknown' (rows missing the column)
+  // always sorts last.
   function refreshFirmwareOptions(){
     var sel = $('firmwareFilter');
     var current = sel.value;
-    var pool = firmwareScopePool();
+    var pool = scopePool('firmware');
     var counts = {};
     pool.forEach(function(d){
       var fw = d.firmwareVersion || 'Unknown';
@@ -1033,17 +998,20 @@ tbody tr:hover{background:var(--panel-2);}
     $('parkSearchList').classList.add('hidden');
   }
 
-  // Facet filtering: Type is scoped by Park; Hardware is scoped by Type+Park;
-  // Park is scoped by Type+Hardware. Each filter's own dimension is excluded
-  // from its own scoping pool so changing it doesn't affect its own option list.
+  // Facet filtering: Type is scoped by Park+Firmware; Hardware is scoped by
+  // Type+Park+Firmware; Park is scoped by Type+Hardware+Firmware; Firmware is
+  // scoped by Type+Hardware+Park. Each filter's own dimension is excluded from
+  // its own scoping pool so changing it doesn't affect its own option list.
   function scopePool(exclude){
     var type = $('typeFilter').value;
     var hw = $('hwFilter').value;
     var park = $('parkFilter').value;
+    var firmware = $('firmwareFilter').value;
     return state.devices.filter(function(d){
       if (exclude !== 'type' && type !== 'all' && d.deviceType !== type) return false;
       if (exclude !== 'hw' && type !== 'all' && hw !== 'all' && d.hardwareType !== hw) return false;
       if (exclude !== 'park' && park !== 'all' && d.segment !== park) return false;
+      if (exclude !== 'firmware' && firmware !== 'all' && (d.firmwareVersion || 'Unknown') !== firmware) return false;
       return true;
     });
   }
@@ -1077,6 +1045,7 @@ tbody tr:hover{background:var(--panel-2);}
   function populateHwFilter(){
     var t = $('typeFilter').value;
     var park = $('parkFilter').value;
+    var firmware = $('firmwareFilter').value;
     var hsel = $('hwFilter');
     var current = hsel.value;
     if (t === 'all'){
@@ -1088,6 +1057,7 @@ tbody tr:hover{background:var(--panel-2);}
     state.devices.forEach(function(d){
       if (d.deviceType !== t) return;
       if (park !== 'all' && d.segment !== park) return;
+      if (firmware !== 'all' && (d.firmwareVersion || 'Unknown') !== firmware) return;
       if (!hwCounts[d.hardwareType]) hwCounts[d.hardwareType] = { total: 0, issues: 0 };
       hwCounts[d.hardwareType].total++;
       if (d.status !== 'ok') hwCounts[d.hardwareType].issues++;
@@ -1154,11 +1124,13 @@ tbody tr:hover{background:var(--panel-2);}
     $('hwFilter').value = 'all';
     populateHwFilter();
     refreshParkOptions();
+    refreshFirmwareOptions();
     renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
   }
 
   function onHwFilterChanged(){
     refreshParkOptions();
+    refreshFirmwareOptions();
     renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
   }
 
@@ -1166,6 +1138,15 @@ tbody tr:hover{background:var(--panel-2);}
     var typeReset = refreshTypeOptions();
     if (typeReset) $('hwFilter').value = 'all';
     populateHwFilter();
+    refreshFirmwareOptions();
+    renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
+  }
+
+  function onFirmwareFilterChanged(){
+    var typeReset = refreshTypeOptions();
+    if (typeReset) $('hwFilter').value = 'all';
+    populateHwFilter();
+    refreshParkOptions();
     renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
   }
 
@@ -1173,15 +1154,17 @@ tbody tr:hover{background:var(--panel-2);}
     $('typeFilter').value = 'all';
     $('hwFilter').value = 'all';
     setParkSelection('all', true);
+    $('firmwareFilter').value = 'all';
     refreshTypeOptions();
     populateHwFilter();
     refreshParkOptions();
+    refreshFirmwareOptions();
   }
 
   function renderScopeNote(){
-    var t = $('typeFilter').value, p = $('parkFilter').value;
+    var t = $('typeFilter').value, p = $('parkFilter').value, f = $('firmwareFilter').value;
     var n = getChartDevices().length;
-    if (t === 'all' && p === 'all'){
+    if (t === 'all' && p === 'all' && f === 'all'){
       $('scopeNote').textContent = 'Showing all ' + n.toLocaleString() + ' devices';
     } else {
       $('scopeNote').textContent = 'Scoped to ' + n.toLocaleString() + ' devices';
@@ -1266,13 +1249,15 @@ tbody tr:hover{background:var(--panel-2);}
     };
   }
 
-  // Short description of the active Type/Hardware/Park scope, e.g. " — Router / RouterModelX · ParkA".
-  // Used to keep chart titles honest about what they're actually showing.
+  // Short description of the active Type/Hardware/Park/Firmware scope, e.g.
+  // " — Router / RouterModelX · ParkA · FW 3.6.20240202". Used to keep chart
+  // titles honest about what they're actually showing.
   function scopeSuffixText(){
-    var t = $('typeFilter').value, h = $('hwFilter').value, p = $('parkFilter').value;
+    var t = $('typeFilter').value, h = $('hwFilter').value, p = $('parkFilter').value, f = $('firmwareFilter').value;
     var bits = [];
     if (t !== 'all') bits.push(h !== 'all' ? (t + ' / ' + h) : t);
     if (p !== 'all') bits.push(p);
+    if (f !== 'all') bits.push('FW ' + f);
     return bits.length ? ' — ' + bits.join(' · ') : '';
   }
 
@@ -1280,10 +1265,12 @@ tbody tr:hover{background:var(--panel-2);}
     var t = $('typeFilter').value;
     var h = $('hwFilter').value;
     var p = $('parkFilter').value;
+    var f = $('firmwareFilter').value;
     return state.devices.filter(function(d){
       if (t !== 'all' && d.deviceType !== t) return false;
       if (t !== 'all' && h !== 'all' && d.hardwareType !== h) return false;
       if (p !== 'all' && d.segment !== p) return false;
+      if (f !== 'all' && (d.firmwareVersion || 'Unknown') !== f) return false;
       return true;
     });
   }
@@ -1312,8 +1299,10 @@ tbody tr:hover{background:var(--panel-2);}
     });
 
     var selectedPark = $('parkFilter').value;
+    var selectedFirmware = $('firmwareFilter').value;
     var typeTitle = byHardware ? ('Issues by hardware type — ' + selectedType) : 'Issues by device type';
     if (selectedPark !== 'all') typeTitle += ' · ' + selectedPark;
+    if (selectedFirmware !== 'all') typeTitle += ' · FW ' + selectedFirmware;
     $('typeChartTitle').textContent = typeTitle;
     $('typeChartHint').textContent = byHardware
       ? 'Hardware variants within ' + selectedType + ' · bar length is the issue count, total device count on hover'
@@ -1425,6 +1414,7 @@ tbody tr:hover{background:var(--panel-2);}
     var typeSel = $('typeFilter').value;
     var hwSel = $('hwFilter').value;
     var parkSel = $('parkFilter').value;
+    var firmwareSel = $('firmwareFilter').value;
     var scoped = typeSel !== 'all';
 
     var allDates = Object.keys(historyMap).sort();
@@ -1444,8 +1434,8 @@ tbody tr:hover{background:var(--panel-2);}
     }
 
     var hint = scoped ? ('One snapshot per day for ' + typeSel + ' devices') : 'One snapshot per day across the whole fleet';
-    if (hwSel !== 'all' || parkSel !== 'all'){
-      hint += ' — hardware/park scope isn\u2019t tracked historically, so it isn\u2019t reflected below';
+    if (hwSel !== 'all' || parkSel !== 'all' || firmwareSel !== 'all'){
+      hint += ' — hardware/park/firmware scope isn\u2019t tracked historically, so it isn\u2019t reflected below';
     }
     $('trendHint').textContent = hint + '.';
     $('trendCount').textContent = usableDates.length.toLocaleString() + ' day' + (usableDates.length > 1 ? 's' : '') + ' tracked';
@@ -1577,7 +1567,6 @@ tbody tr:hover{background:var(--panel-2);}
   }
 
   function applyFilters(){
-    refreshFirmwareOptions();
     var q = $('searchInput').value.trim().toLowerCase();
     var statusF = $('statusFilter').value;
     var typeF = $('typeFilter').value;
@@ -2296,7 +2285,7 @@ tbody tr:hover{background:var(--panel-2);}
   });
   $('trendToggle').addEventListener('click', function(){ setTrendExpanded(!trendExpanded); });
   $('checkedFilter').addEventListener('change', applyFilters);
-  $('firmwareFilter').addEventListener('change', applyFilters);
+  $('firmwareFilter').addEventListener('change', onFirmwareFilterChanged);
   $('prevPage').addEventListener('click', function(){ if (state.page > 1){ state.page--; renderTable(); window.scrollTo({ top: document.querySelector('.tbl-wrap').offsetTop - 20, behavior: 'smooth' }); } });
   $('nextPage').addEventListener('click', function(){ state.page++; renderTable(); window.scrollTo({ top: document.querySelector('.tbl-wrap').offsetTop - 20, behavior: 'smooth' }); });
   $('modalCancel').addEventListener('click', closeModal);

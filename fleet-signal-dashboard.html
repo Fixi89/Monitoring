@@ -260,10 +260,19 @@ input[type=file]{display:none;}
   background:var(--panel-2);box-shadow:var(--edge);border:none;color:var(--text-input);
   border-radius:var(--radius-input);padding:8px 12px;font-size:13px;font-family:var(--font-sans);
 }
-.controls input[type=text]{flex:1;min-width:200px;}
-.controls select{min-width:150px;}
+.controls input[type=text]{flex:1 1 220px;min-width:180px;max-width:340px;}
+.controls select{
+  flex:0 1 auto;min-width:150px;max-width:200px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.controls select#firmwareFilter{max-width:180px;}
 .controls input:focus,.controls select:focus{outline:none;box-shadow:var(--edge-strong);}
 .count-note{font-size:12px;color:var(--text-muted);margin-left:auto;white-space:nowrap;}
+
+@media (max-width:640px){
+  .controls select{max-width:none;flex:1 1 150px;}
+  .controls input[type=text]{max-width:none;}
+}
 
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead th{
@@ -896,18 +905,53 @@ tbody tr:hover{background:var(--panel-2);}
     refreshTypeOptions();
     populateHwFilter();
     refreshParkOptions();
-    populateFirmwareFilter();
+    refreshFirmwareOptions();
+  }
+
+  // Everything the Firmware dropdown should be scoped by, mirroring the same
+  // conditions applyFilters() uses for every other active filter — but never
+  // the firmware selection itself, so its own option list doesn't collapse
+  // onto whatever is currently chosen.
+  function firmwareScopePool(){
+    var q = $('searchInput').value.trim().toLowerCase();
+    var statusF = $('statusFilter').value;
+    var typeF = $('typeFilter').value;
+    var hwF = $('hwFilter').value;
+    var parkF = $('parkFilter').value;
+    var checkedF = $('checkedFilter').value;
+    return state.devices.filter(function(d){
+      if (statusF === 'issues' && d.status === 'ok') return false;
+      if (statusF !== 'all' && statusF !== 'issues' && d.status !== statusF) return false;
+      if (typeF !== 'all' && d.deviceType !== typeF) return false;
+      if (typeF !== 'all' && hwF !== 'all' && d.hardwareType !== hwF) return false;
+      if (parkF !== 'all' && d.segment !== parkF) return false;
+      var rec = state.statusMap[d.id];
+      var checked = !!(rec && rec.checked);
+      if (checkedF === 'checked' && !checked) return false;
+      if (checkedF === 'unchecked' && checked) return false;
+      if (checkedF === 'commented' && !(rec && rec.comment)) return false;
+      if (q){
+        var hay = (d.fqsn + ' ' + d.segment + ' ' + d.deviceType + ' ' + d.hardwareType + ' ' + d.firmwareVersion + ' ' + d.id).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
   }
 
   // Firmware is a plain table filter (like Review), not a chart-scoping facet like
   // Type/Hardware/Park — it isn't tracked in Firebase history, so it only narrows
-  // the table, not the charts. Options are the distinct values found in the loaded
-  // data, sorted with 'Unknown' (rows missing the column) always last.
-  function populateFirmwareFilter(){
+  // the table, not the charts. Its own option list, though, reacts to every other
+  // active filter (status, review, type/hardware/park scope, search) the same way
+  // Hardware reacts to Type: only firmware versions that actually occur within the
+  // current scope are listed, and a selection that falls out of scope resets to
+  // 'all' rather than silently filtering everything out. 'Unknown' (rows missing
+  // the column) always sorts last.
+  function refreshFirmwareOptions(){
     var sel = $('firmwareFilter');
     var current = sel.value;
+    var pool = firmwareScopePool();
     var counts = {};
-    state.devices.forEach(function(d){
+    pool.forEach(function(d){
       var fw = d.firmwareVersion || 'Unknown';
       counts[fw] = (counts[fw] || 0) + 1;
     });
@@ -920,14 +964,16 @@ tbody tr:hover{background:var(--panel-2);}
     versions.forEach(function(v){
       var o = document.createElement('option');
       o.value = v;
+      o.title = v + ' (' + counts[v] + ')';
       o.textContent = 'Firmware: ' + v + ' (' + counts[v] + ')';
       sel.appendChild(o);
     });
     if (current !== 'all' && !counts[current]){
       sel.value = 'all';
-    } else {
-      sel.value = current;
+      return true;
     }
+    sel.value = current;
+    return false;
   }
 
   var PARK_PAGE_SIZE = 50;
@@ -1531,6 +1577,7 @@ tbody tr:hover{background:var(--panel-2);}
   }
 
   function applyFilters(){
+    refreshFirmwareOptions();
     var q = $('searchInput').value.trim().toLowerCase();
     var statusF = $('statusFilter').value;
     var typeF = $('typeFilter').value;

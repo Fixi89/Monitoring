@@ -433,7 +433,7 @@ tbody tr:hover{background:var(--panel-2);}
       <span class="chart-scope-label">Chart scope</span>
       <select id="typeFilter"><option value="all">Type: all</option></select>
       <select id="hwFilter" disabled><option value="all">Hardware: select a type first</option></select>
-      <select id="firmwareFilter"><option value="all">Firmware: all</option></select>
+      <select id="firmwareFilter" disabled><option value="all">Firmware: select a type first</option></select>
       <div class="park-combo">
         <input type="text" id="parkSearchInput" placeholder="Park: all" autocomplete="off">
         <div class="park-combo-list hidden" id="parkSearchList"></div>
@@ -905,15 +905,23 @@ tbody tr:hover{background:var(--panel-2);}
     refreshFirmwareOptions();
   }
 
-  // Firmware is now a chart-scoping facet alongside Type/Hardware/Park: it narrows
-  // the two charts and mutually restricts (and is restricted by) the other three via
-  // scopePool(), the same mechanism Park already uses. It is NOT tracked in Firebase
-  // history, so — like Hardware/Park already do for the trend chart — it has no effect
-  // there; see renderTrendChart()'s hint text. 'Unknown' (rows missing the column)
-  // always sorts last.
+  // Firmware is a chart-scoping facet alongside Type/Hardware/Park: it narrows
+  // the two charts and mutually restricts (and is restricted by) Hardware/Park via
+  // scopePool(). Like Hardware, it requires a Type to be picked first — firmware
+  // strings are meaningful only within one device type, so the dropdown stays
+  // disabled with a 'select a type first' placeholder until then. It is NOT
+  // tracked in Firebase history, so — like Hardware/Park already do for the trend
+  // chart — it has no effect there; see renderTrendChart()'s hint text. 'Unknown'
+  // (rows missing the column) always sorts last.
   function refreshFirmwareOptions(){
     var sel = $('firmwareFilter');
     var current = sel.value;
+    var t = $('typeFilter').value;
+    if (t === 'all'){
+      sel.innerHTML = '<option value="all">Firmware: select a type first</option>';
+      sel.disabled = true;
+      return false;
+    }
     var pool = scopePool('firmware');
     var counts = {};
     pool.forEach(function(d){
@@ -925,6 +933,7 @@ tbody tr:hover{background:var(--panel-2);}
       if (b === 'Unknown') return -1;
       return a.localeCompare(b, undefined, { numeric: true });
     });
+    sel.disabled = false;
     sel.innerHTML = '<option value="all">Firmware: all (' + versions.length + ')</option>';
     versions.forEach(function(v){
       var o = document.createElement('option');
@@ -1122,6 +1131,7 @@ tbody tr:hover{background:var(--panel-2);}
 
   function onTypeFilterChanged(){
     $('hwFilter').value = 'all';
+    $('firmwareFilter').value = 'all';
     populateHwFilter();
     refreshParkOptions();
     refreshFirmwareOptions();

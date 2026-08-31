@@ -473,6 +473,9 @@ tbody tr:hover{background:var(--panel-2);}
         <option value="checked">Review: checked</option>
         <option value="commented">Review: has comment</option>
       </select>
+      <select id="firmwareFilter">
+        <option value="all">Firmware: all</option>
+      </select>
       <span class="count-note" id="countNote"></span>
     </div>
 
@@ -485,6 +488,7 @@ tbody tr:hover{background:var(--panel-2);}
               <th class="sortable" data-sort="segment">Park / segment</th>
               <th class="sortable" data-sort="deviceType">Type</th>
               <th class="sortable" data-sort="hardwareType">Hardware</th>
+              <th class="sortable" data-sort="firmwareVersion">Firmware</th>
               <th class="sortable" data-sort="status">Status</th>
               <th class="sortable" data-sort="lastPing">Last ping</th>
               <th class="sortable" data-sort="lastConn">Last data</th>
@@ -562,6 +566,7 @@ tbody tr:hover{background:var(--panel-2);}
       <div class="field"><p class="k">Park / segment</p><p class="v" id="modalSegment"></p></div>
       <div class="field"><p class="k">Device type</p><p class="v" id="modalType"></p></div>
       <div class="field"><p class="k">Hardware type</p><p class="v" id="modalHardware"></p></div>
+      <div class="field"><p class="k">Firmware</p><p class="v" id="modalFirmware"></p></div>
       <div class="field"><p class="k">Last ping</p><p class="v" id="modalPing"></p></div>
       <div class="field"><p class="k">Last data received</p><p class="v" id="modalConn"></p></div>
     </div>
@@ -728,6 +733,9 @@ tbody tr:hover{background:var(--panel-2);}
       var segment = row['Column1.segment'] || '—';
       var deviceType = row['Column1.deviceType'] || 'Unknown';
       var hardwareType = row['Column1.result.TypeHardware'] || 'Unknown';
+      // Newer exports only — not every device row has this column yet, so rows
+      // without it fall back to 'Unknown' rather than breaking the filter/grouping.
+      var firmwareVersion = row['Column1.result.FirmwareVersion'] || 'Unknown';
 
       var snmp = parseDate(row['Column1.result.LastSnmpConnection']);
       var prom = parseDate(row['Column1.result.LastPrometheusConnection']);
@@ -742,7 +750,7 @@ tbody tr:hover{background:var(--panel-2);}
       typesSet[deviceType] = true;
       hwSet[deviceType] = hwSet[deviceType] || {};
       hwSet[deviceType][hardwareType] = true;
-      devices.push({ id: id, fqsn: fqsn, segment: segment, deviceType: deviceType, hardwareType: hardwareType, lastPing: lastPing, lastConn: lastConn, status: status });
+      devices.push({ id: id, fqsn: fqsn, segment: segment, deviceType: deviceType, hardwareType: hardwareType, firmwareVersion: firmwareVersion, lastPing: lastPing, lastConn: lastConn, status: status });
     });
   }
 
@@ -888,6 +896,38 @@ tbody tr:hover{background:var(--panel-2);}
     refreshTypeOptions();
     populateHwFilter();
     refreshParkOptions();
+    populateFirmwareFilter();
+  }
+
+  // Firmware is a plain table filter (like Review), not a chart-scoping facet like
+  // Type/Hardware/Park — it isn't tracked in Firebase history, so it only narrows
+  // the table, not the charts. Options are the distinct values found in the loaded
+  // data, sorted with 'Unknown' (rows missing the column) always last.
+  function populateFirmwareFilter(){
+    var sel = $('firmwareFilter');
+    var current = sel.value;
+    var counts = {};
+    state.devices.forEach(function(d){
+      var fw = d.firmwareVersion || 'Unknown';
+      counts[fw] = (counts[fw] || 0) + 1;
+    });
+    var versions = Object.keys(counts).sort(function(a, b){
+      if (a === 'Unknown') return 1;
+      if (b === 'Unknown') return -1;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+    sel.innerHTML = '<option value="all">Firmware: all (' + versions.length + ')</option>';
+    versions.forEach(function(v){
+      var o = document.createElement('option');
+      o.value = v;
+      o.textContent = 'Firmware: ' + v + ' (' + counts[v] + ')';
+      sel.appendChild(o);
+    });
+    if (current !== 'all' && !counts[current]){
+      sel.value = 'all';
+    } else {
+      sel.value = current;
+    }
   }
 
   var PARK_PAGE_SIZE = 50;
@@ -1497,6 +1537,7 @@ tbody tr:hover{background:var(--panel-2);}
     var hwF = $('hwFilter').value;
     var parkF = $('parkFilter').value;
     var checkedF = $('checkedFilter').value;
+    var firmwareF = $('firmwareFilter').value;
 
     state.filtered = state.devices.filter(function(d){
       if (statusF === 'issues' && d.status === 'ok') return false;
@@ -1504,13 +1545,14 @@ tbody tr:hover{background:var(--panel-2);}
       if (typeF !== 'all' && d.deviceType !== typeF) return false;
       if (typeF !== 'all' && hwF !== 'all' && d.hardwareType !== hwF) return false;
       if (parkF !== 'all' && d.segment !== parkF) return false;
+      if (firmwareF !== 'all' && (d.firmwareVersion || 'Unknown') !== firmwareF) return false;
       var rec = state.statusMap[d.id];
       var checked = !!(rec && rec.checked);
       if (checkedF === 'checked' && !checked) return false;
       if (checkedF === 'unchecked' && checked) return false;
       if (checkedF === 'commented' && !(rec && rec.comment)) return false;
       if (q){
-        var hay = (d.fqsn + ' ' + d.segment + ' ' + d.deviceType + ' ' + d.hardwareType + ' ' + d.id).toLowerCase();
+        var hay = (d.fqsn + ' ' + d.segment + ' ' + d.deviceType + ' ' + d.hardwareType + ' ' + d.firmwareVersion + ' ' + d.id).toLowerCase();
         if (hay.indexOf(q) === -1) return false;
       }
       return true;
@@ -1547,6 +1589,7 @@ tbody tr:hover{background:var(--panel-2);}
         '<td>' + escapeHtml(d.segment) + '</td>' +
         '<td>' + escapeHtml(d.deviceType) + '</td>' +
         '<td>' + escapeHtml(d.hardwareType || '—') + '</td>' +
+        '<td class="mono">' + escapeHtml(d.firmwareVersion || '—') + '</td>' +
         '<td><span class="status-chip ' + d.status + '"><span class="dot"></span>' + statusLabel(d.status) + '</span></td>' +
         '<td class="mono">' + fmtDate(d.lastPing) + '</td>' +
         '<td class="mono">' + fmtDate(d.lastConn) + '</td>' +
@@ -1578,6 +1621,7 @@ tbody tr:hover{background:var(--panel-2);}
     $('modalSegment').textContent = d.segment;
     $('modalType').textContent = d.deviceType;
     $('modalHardware').textContent = d.hardwareType || '—';
+    $('modalFirmware').textContent = d.firmwareVersion || '—';
     $('modalPing').textContent = fmtDate(d.lastPing);
     $('modalConn').textContent = fmtDate(d.lastConn);
     $('modalStatusRow').innerHTML = '<span class="status-chip ' + d.status + '"><span class="dot"></span>' + statusLabel(d.status) + '</span>';
@@ -2032,11 +2076,11 @@ tbody tr:hover{background:var(--panel-2);}
     var opt = $('exportCsvOption');
     var originalLabel = opt.textContent;
     opt.disabled = true; opt.textContent = 'Preparing…';
-    var rows = [['Device','Park/segment','Type','Hardware','Status','LastPing','LastData','Checked','CheckedBy','Comment']];
+    var rows = [['Device','Park/segment','Type','Hardware','Firmware','Status','LastPing','LastData','Checked','CheckedBy','Comment']];
     Promise.all(state.filtered.map(function(d){
       var rec = state.statusMap[d.id] || {};
       return decryptText(rec.checkedByEnc).then(function(name){
-        return [d.fqsn, d.segment, d.deviceType, d.hardwareType, statusLabel(d.status), fmtDate(d.lastPing), fmtDate(d.lastConn), rec.checked ? 'Yes' : 'No', name, (rec.comment || '').replace(/\n/g,' ')];
+        return [d.fqsn, d.segment, d.deviceType, d.hardwareType, d.firmwareVersion, statusLabel(d.status), fmtDate(d.lastPing), fmtDate(d.lastConn), rec.checked ? 'Yes' : 'No', name, (rec.comment || '').replace(/\n/g,' ')];
       });
     })).then(function(dataRows){
       rows = rows.concat(dataRows);
@@ -2058,15 +2102,15 @@ tbody tr:hover{background:var(--panel-2);}
     var opt = $('exportXlsxOption');
     var originalLabel = opt.textContent;
     opt.disabled = true; opt.textContent = 'Preparing…';
-    var header = ['Device','Park/segment','Type','Hardware','Status','Last ping','Last data','Checked','Checked by','Comment'];
+    var header = ['Device','Park/segment','Type','Hardware','Firmware','Status','Last ping','Last data','Checked','Checked by','Comment'];
     Promise.all(state.filtered.map(function(d){
       var rec = state.statusMap[d.id] || {};
       return decryptText(rec.checkedByEnc).then(function(name){
-        return [d.fqsn, d.segment, d.deviceType, d.hardwareType, statusLabel(d.status), fmtDate(d.lastPing), fmtDate(d.lastConn), rec.checked ? 'Yes' : 'No', name, rec.comment || ''];
+        return [d.fqsn, d.segment, d.deviceType, d.hardwareType, d.firmwareVersion, statusLabel(d.status), fmtDate(d.lastPing), fmtDate(d.lastConn), rec.checked ? 'Yes' : 'No', name, rec.comment || ''];
       });
     })).then(function(dataRows){
       var ws = XLSX.utils.aoa_to_sheet([header].concat(dataRows));
-      ws['!cols'] = [{wch:16},{wch:22},{wch:14},{wch:22},{wch:16},{wch:18},{wch:18},{wch:9},{wch:16},{wch:40}];
+      ws['!cols'] = [{wch:16},{wch:22},{wch:14},{wch:22},{wch:14},{wch:16},{wch:18},{wch:18},{wch:9},{wch:16},{wch:40}];
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Fleet Signal export');
       XLSX.writeFile(wb, 'fleet-signal-export.xlsx');
@@ -2205,6 +2249,7 @@ tbody tr:hover{background:var(--panel-2);}
   });
   $('trendToggle').addEventListener('click', function(){ setTrendExpanded(!trendExpanded); });
   $('checkedFilter').addEventListener('change', applyFilters);
+  $('firmwareFilter').addEventListener('change', applyFilters);
   $('prevPage').addEventListener('click', function(){ if (state.page > 1){ state.page--; renderTable(); window.scrollTo({ top: document.querySelector('.tbl-wrap').offsetTop - 20, behavior: 'smooth' }); } });
   $('nextPage').addEventListener('click', function(){ state.page++; renderTable(); window.scrollTo({ top: document.querySelector('.tbl-wrap').offsetTop - 20, behavior: 'smooth' }); });
   $('modalCancel').addEventListener('click', closeModal);

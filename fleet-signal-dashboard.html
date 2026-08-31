@@ -244,7 +244,6 @@ input[type=file]{display:none;}
 .park-item .stats .pct-ok{font-weight:500;}
 .park-item.all-option{font-weight:600;color:var(--accent);}
 .park-combo-empty{padding:12px;color:var(--text-muted);font-size:12.5px;text-align:center;}
-.scope-note{font-size:12px;color:var(--text-muted);margin-left:auto;}
 .btn-sm{padding:7px 14px;font-size:12.5px;}
 .legend-stack{flex-direction:column;gap:7px;}
 .panel{background:var(--panel-tint);box-shadow:var(--card-shadow);border-radius:var(--radius-card);padding:18px 20px;display:flex;flex-direction:column;}
@@ -440,7 +439,6 @@ tbody tr:hover{background:var(--panel-2);}
       </div>
       <select id="parkFilter" style="display:none;"><option value="all">Park: all</option></select>
       <button class="btn btn-sm" id="resetScope">Reset scope</button>
-      <span class="scope-note" id="scopeNote"></span>
     </div>
 
     <div class="panels">
@@ -1135,13 +1133,13 @@ tbody tr:hover{background:var(--panel-2);}
     populateHwFilter();
     refreshParkOptions();
     refreshFirmwareOptions();
-    renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
+    renderCharts(); applyFilters(); renderTrendChart();
   }
 
   function onHwFilterChanged(){
     refreshParkOptions();
     refreshFirmwareOptions();
-    renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
+    renderCharts(); applyFilters(); renderTrendChart();
   }
 
   function onParkFilterChanged(){
@@ -1149,7 +1147,7 @@ tbody tr:hover{background:var(--panel-2);}
     if (typeReset) $('hwFilter').value = 'all';
     populateHwFilter();
     refreshFirmwareOptions();
-    renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
+    renderCharts(); applyFilters(); renderTrendChart();
   }
 
   function onFirmwareFilterChanged(){
@@ -1157,7 +1155,7 @@ tbody tr:hover{background:var(--panel-2);}
     if (typeReset) $('hwFilter').value = 'all';
     populateHwFilter();
     refreshParkOptions();
-    renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
+    renderCharts(); applyFilters(); renderTrendChart();
   }
 
   function resetChartScope(){
@@ -1169,16 +1167,6 @@ tbody tr:hover{background:var(--panel-2);}
     populateHwFilter();
     refreshParkOptions();
     refreshFirmwareOptions();
-  }
-
-  function renderScopeNote(){
-    var t = $('typeFilter').value, p = $('parkFilter').value, f = $('firmwareFilter').value;
-    var n = getChartDevices().length;
-    if (t === 'all' && p === 'all' && f === 'all'){
-      $('scopeNote').textContent = 'Showing all ' + n.toLocaleString() + ' devices';
-    } else {
-      $('scopeNote').textContent = 'Scoped to ' + n.toLocaleString() + ' devices';
-    }
   }
 
   function statusLabel(s){
@@ -1856,7 +1844,6 @@ tbody tr:hover{background:var(--panel-2);}
         renderKPIs();
         resetChartScope();
         renderCharts();
-        renderScopeNote();
         applyFilters();
         renderTrendChart();
         showToast('Loaded ' + devices.length.toLocaleString() + ' devices from ' + files.length + ' file' + (files.length > 1 ? 's' : '') + ' — data stays in this browser tab only');
@@ -2291,7 +2278,7 @@ tbody tr:hover{background:var(--panel-2);}
 
   $('resetScope').addEventListener('click', function(){
     resetChartScope();
-    renderCharts(); renderScopeNote(); applyFilters(); renderTrendChart();
+    renderCharts(); applyFilters(); renderTrendChart();
   });
   $('trendToggle').addEventListener('click', function(){ setTrendExpanded(!trendExpanded); });
   $('checkedFilter').addEventListener('change', applyFilters);

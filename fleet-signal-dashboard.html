@@ -48,14 +48,14 @@
   --ok:#3ecf7a;
   --ok-dim:#1f7a4d;                             /* solid badge fill, not a dim tint */
   --ok-text:#ffffff;
-  --stale:#f2b33d;
-  --stale-dim:#c9861a;
+  --stale:#4c6ef5;                              /* Data outdated — blue */
+  --stale-dim:#2c4a9e;
   --stale-text:#ffffff;
-  --never:#e2564a;
-  --never-dim:#a52f28;
+  --never:#f2792e;                              /* No data received — orange */
+  --never-dim:#c9591a;
   --never-text:#ffffff;
-  --unreachable:#93a4bd;
-  --unreachable-dim:#4c5f78;
+  --unreachable:#e5484d;                        /* Never reached — red */
+  --unreachable-dim:#a52f28;
   --unreachable-text:#ffffff;
   --radius-card:10px;
   --radius-input:6px;
@@ -99,15 +99,15 @@ html[data-mode="light"]{
   --ok:#1a8f5a;
   --ok-dim:#e3f9ef;
   --ok-text:#1a8f5a;
-  --stale:#9a6400;
-  --stale-dim:#fff3dc;
-  --stale-text:#9a6400;
-  --never:#b3283a;
-  --never-dim:#fde8ea;
-  --never-text:#b3283a;
-  --unreachable:#5b6572;
-  --unreachable-dim:#edeef0;
-  --unreachable-text:#5b6572;
+  --stale:#1e40af;                              /* Data outdated — blue */
+  --stale-dim:#e5edfd;
+  --stale-text:#1e40af;
+  --never:#a35b0f;                              /* No data received — orange */
+  --never-dim:#fdecd9;
+  --never-text:#a35b0f;
+  --unreachable:#b3283a;                        /* Never reached — red */
+  --unreachable-dim:#fde8ea;
+  --unreachable-text:#b3283a;
   --radius-card:24px;
   --radius-input:10px;
   --radius-button:980px;
@@ -1881,6 +1881,12 @@ tbody tr:hover{background:var(--panel-2);}
       if (el) el.classList.toggle('btn-primary', !folderLinkSupported);
     });
     if ($('emptyFallbackHint')) $('emptyFallbackHint').style.display = folderLinkSupported ? 'block' : 'none';
+    // Once a folder is linked, the toolbar's manual Update data / Select folder buttons
+    // are redundant next to Reload/Reactivate/Unlink and just add clutter — hide them.
+    // (The empty-state fallback buttons are left alone; that view only shows when
+    // nothing has loaded yet, including the edge case of a linked folder being empty.)
+    if ($('uploadBtn')) $('uploadBtn').style.display = linked ? 'none' : 'inline-flex';
+    if ($('folderBtn')) $('folderBtn').style.display = linked ? 'none' : 'inline-flex';
 
     var pill = $('folderStatusPill');
     if (pill){

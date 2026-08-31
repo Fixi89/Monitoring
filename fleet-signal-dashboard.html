@@ -377,15 +377,15 @@ tbody tr:hover{background:var(--panel-2);}
           <button id="exportXlsxOption">Export as Excel</button>
         </div>
       </div>
-      <button class="btn btn-primary" id="uploadBtn">Update data</button>
-      <button class="btn" id="folderBtn" title="Select an entire folder of CSV/Excel files">Select folder</button>
-      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.zip" multiple>
-      <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;">
-      <button class="btn" id="linkFolderBtn" type="button" style="display:none;" title="Link the shared network folder so it re-reads automatically">Link data folder</button>
+      <button class="btn" id="linkFolderBtn" type="button" style="display:none;" title="Recommended — reads the shared network folder automatically">Link data folder</button>
       <span class="meta-pill" id="folderStatusPill" style="display:none;"></span>
       <button class="btn btn-sm" id="reloadFolderBtn" type="button" style="display:none;">Reload folder</button>
       <button class="btn btn-sm" id="reactivateFolderBtn" type="button" style="display:none;">Reactivate folder access</button>
       <button class="btn btn-sm" id="unlinkFolderBtn" type="button" style="display:none;">Unlink folder</button>
+      <button class="btn" id="uploadBtn" title="Manual fallback — use if you don't have access to the shared folder">Update data</button>
+      <button class="btn" id="folderBtn" title="Select an entire folder of CSV/Excel files">Select folder</button>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.zip" multiple>
+      <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;">
       <button class="btn btn-icon" id="themeToggle" type="button" title="Switch to light mode" aria-label="Switch to light mode">
         <svg id="themeIconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg id="themeIconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
@@ -405,9 +405,10 @@ tbody tr:hover{background:var(--panel-2);}
       <p class="hint" style="margin-bottom:10px;">This browser has a linked data folder, but access needs to be reactivated.</p>
       <button class="btn btn-primary" id="emptyReactivateBtn">Reactivate folder access</button>
     </div>
+    <button class="btn" id="emptyLinkFolderBtn" style="display:none;" title="Recommended — reads the shared network folder automatically">Link data folder</button>
+    <p class="hint" id="emptyFallbackHint" style="display:none;margin:14px 0 8px;">or, as a manual fallback:</p>
     <button class="btn btn-primary" id="emptyUploadBtn">Upload data files</button>
     <button class="btn" id="emptyFolderBtn">Or select a folder</button>
-    <button class="btn" id="emptyLinkFolderBtn" style="display:none;">Link data folder</button>
     <p class="hint" style="margin-top:14px;">or drag &amp; drop files or a whole folder anywhere on this page</p>
   </div>
 
@@ -615,8 +616,7 @@ tbody tr:hover{background:var(--panel-2);}
     linkedDirHandle: null,
     folderPermission: null,
     folderName: '',
-    folderLastSync: null,
-    folderPollTimer: null
+    folderLastSync: null
   };
 
   var typeChart = null, donutChart = null, trendChart = null;
@@ -1795,7 +1795,6 @@ tbody tr:hover{background:var(--panel-2);}
   // only — Safari and Firefox don't implement showDirectoryPicker, so the whole
   // feature quietly hides itself there and the manual upload / drag-and-drop /
   // zip path (unchanged above) remains the only — and fully sufficient — option.
-  var FOLDER_POLL_MS = 120000;
   var HANDLE_DB_NAME = 'fleet-signal-fs';
   var HANDLE_STORE = 'handles';
   var HANDLE_KEY = 'dataFolder';
@@ -1871,8 +1870,17 @@ tbody tr:hover{background:var(--panel-2);}
 
     ['linkFolderBtn', 'emptyLinkFolderBtn'].forEach(function(id){
       var el = $(id);
-      if (el) el.style.display = (folderLinkSupported && !linked) ? 'inline-flex' : 'none';
+      if (!el) return;
+      el.style.display = (folderLinkSupported && !linked) ? 'inline-flex' : 'none';
+      el.classList.toggle('btn-primary', folderLinkSupported);
     });
+    // Manual upload is the recommended path only where folder-linking isn't available
+    // at all (e.g. Safari); everywhere else it's a fallback, so it loses the primary
+    // styling and gets a small "manual fallback" label instead.
+    [$('uploadBtn'), $('emptyUploadBtn')].forEach(function(el){
+      if (el) el.classList.toggle('btn-primary', !folderLinkSupported);
+    });
+    if ($('emptyFallbackHint')) $('emptyFallbackHint').style.display = folderLinkSupported ? 'block' : 'none';
 
     var pill = $('folderStatusPill');
     if (pill){
@@ -1892,9 +1900,9 @@ tbody tr:hover{background:var(--panel-2);}
   }
 
   // Single entry point for every kind of (re)load from the linked folder — the
-  // initial auto-load on page open, the manual "Reload folder" click, and the
-  // silent 2-minute background poll all funnel through here so the permission
-  // check and UI refresh stay consistent no matter what triggered it.
+  // initial auto-load on page open and the manual "Reload folder" click both
+  // funnel through here so the permission check and UI refresh stay consistent
+  // no matter which one triggered it. No background polling — see initFolderLink().
   function loadFromLinkedFolder(opts){
     opts = opts || {};
     if (!state.linkedDirHandle) return Promise.resolve();
@@ -1963,7 +1971,6 @@ tbody tr:hover{background:var(--panel-2);}
     state.folderPermission = null;
     state.folderName = '';
     state.folderLastSync = null;
-    if (state.folderPollTimer){ clearInterval(state.folderPollTimer); state.folderPollTimer = null; }
     clearDirHandle().catch(function(){ /* best effort */ });
     renderFolderLinkUI();
     showToast('Folder unlinked');
@@ -1997,8 +2004,8 @@ tbody tr:hover{background:var(--panel-2);}
   // granted, reloads silently right away; if not, leaves the "Reactivate folder
   // access" affordance visible instead of prompting (requestPermission must be
   // called from a user gesture, so it can't be triggered automatically here).
-  // Either way, starts the 2-minute background poll, which re-checks permission
-  // on every tick and simply skips the read if it's no longer granted.
+  // This only runs once, on load — there's no background polling; use "Reload
+  // folder" (or reopen the page) to pick up newer files.
   function initFolderLink(){
     if (!folderLinkSupported){ renderFolderLinkUI(); return; }
     loadDirHandle().then(function(handle){
@@ -2012,10 +2019,6 @@ tbody tr:hover{background:var(--panel-2);}
       });
     }).catch(function(){
       renderFolderLinkUI();
-    }).finally(function(){
-      state.folderPollTimer = setInterval(function(){
-        if (state.linkedDirHandle) loadFromLinkedFolder({ silent: true, background: true });
-      }, FOLDER_POLL_MS);
     });
   }
 

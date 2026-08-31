@@ -21,14 +21,14 @@
 <style>
 :root{
   /* DARK — OT-Monitoring reference (screenshot). A flatter, more literal "control room"
-     look than the previous frosted-glass AuthKit pass: solid navy surfaces with plain
+     look than the earlier frosted-glass AuthKit pass: solid navy surfaces with plain
      low-contrast borders (no translucent glass layering), amber as the one primary
-     accent (KPI numbers, primary actions — replacing the earlier violet), cyan as the
-     secondary/info accent (links, icons, chart highlights — replacing blueprint blue),
-     and status badges as solid saturated fills with white text rather than dim tints.
+     accent (KPI numbers, primary actions — replacing violet), cyan as the secondary/
+     info accent (links, icons, chart highlights — replacing blueprint blue), and status
+     badges as solid saturated fills with white text rather than dim tints.
      --edge/--card-shadow/--shadow-modal are just redefined below to plain border-style
      values, so every component that already uses them (buttons, inputs, cards, modal)
-     picks up the new look without touching each component rule again. */
+     picks up the look without touching each component rule again. */
   --bg-0:#0a1929;
   --bg-1:#0d2035;
   --panel:#132840;
@@ -381,6 +381,11 @@ tbody tr:hover{background:var(--panel-2);}
       <button class="btn" id="folderBtn" title="Select an entire folder of CSV/Excel files">Select folder</button>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.zip" multiple>
       <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;">
+      <button class="btn" id="linkFolderBtn" type="button" style="display:none;" title="Link the shared network folder so it re-reads automatically">Link data folder</button>
+      <span class="meta-pill" id="folderStatusPill" style="display:none;"></span>
+      <button class="btn btn-sm" id="reloadFolderBtn" type="button" style="display:none;">Reload folder</button>
+      <button class="btn btn-sm" id="reactivateFolderBtn" type="button" style="display:none;">Reactivate folder access</button>
+      <button class="btn btn-sm" id="unlinkFolderBtn" type="button" style="display:none;">Unlink folder</button>
       <button class="btn btn-icon" id="themeToggle" type="button" title="Switch to light mode" aria-label="Switch to light mode">
         <svg id="themeIconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg id="themeIconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
@@ -396,8 +401,13 @@ tbody tr:hover{background:var(--panel-2);}
     </svg>
     <h2>No dataset loaded yet</h2>
     <p>Drop your device export files — the whole folder they're in, or a single .zip of them — here to see which devices in the fleet are sending data, which never have, and which have gone quiet.</p>
+    <div id="emptyReactivateRow" style="display:none;margin-bottom:14px;">
+      <p class="hint" style="margin-bottom:10px;">This browser has a linked data folder, but access needs to be reactivated.</p>
+      <button class="btn btn-primary" id="emptyReactivateBtn">Reactivate folder access</button>
+    </div>
     <button class="btn btn-primary" id="emptyUploadBtn">Upload data files</button>
     <button class="btn" id="emptyFolderBtn">Or select a folder</button>
+    <button class="btn" id="emptyLinkFolderBtn" style="display:none;">Link data folder</button>
     <p class="hint" style="margin-top:14px;">or drag &amp; drop files or a whole folder anywhere on this page</p>
   </div>
 
@@ -512,6 +522,33 @@ tbody tr:hover{background:var(--panel-2);}
   </div>
 </div>
 
+<div class="overlay hidden" id="linkFolderOverlay">
+  <div class="modal">
+    <h2>Link the shared data folder</h2>
+    <p style="color:var(--text-secondary);font-size:13px;line-height:1.5;margin:0 0 18px;">
+      Point Fleet Signal at the shared network folder so it re-reads the latest device exports on its own — no more manual uploads. The folder link and its permission are stored only in this browser.
+    </p>
+    <label for="folderPathDisplay">Folder path</label>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="folderPathDisplay" readonly value="V:\NST_FILER\Dept\PIT\_Copy\JSC\monitoring_availability_data" style="flex:1;font-family:var(--font-mono);font-size:12px;">
+      <button class="btn btn-sm" id="copyFolderPathBtn" type="button">Copy</button>
+    </div>
+    <div class="field" style="margin-top:16px;">
+      <p class="k">How to link it</p>
+      <p style="font-size:12.5px;line-height:1.6;color:var(--text-primary);margin:4px 0 0;">
+        1. Click "Choose folder" below.<br>
+        2. In the picker, paste or navigate to the path above.<br>
+        3. Select the folder and confirm — the browser remembers this choice for next time.
+      </p>
+    </div>
+    <p class="save-note">Needs Chrome or Edge. On Safari or Firefox, keep using the manual upload or drag-and-drop instead.</p>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="linkFolderCancel">Cancel</button>
+      <button class="btn btn-primary" id="chooseFolderBtn">Choose folder…</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay hidden" id="modalOverlay">
   <div class="modal">
     <h2 id="modalDeviceName">Device</h2>
@@ -574,7 +611,12 @@ tbody tr:hover{background:var(--panel-2);}
     parkListShown: 0,
     parkListQuery: '',
     parkTotalCount: 0,
-    historyMap: null
+    historyMap: null,
+    linkedDirHandle: null,
+    folderPermission: null,
+    folderName: '',
+    folderLastSync: null,
+    folderPollTimer: null
   };
 
   var typeChart = null, donutChart = null, trendChart = null;
@@ -1745,6 +1787,238 @@ tbody tr:hover{background:var(--panel-2);}
     });
   }
 
+  // ---- Linked data folder (File System Access API) ----------------------
+  // Lets a colleague point Fleet Signal at the shared network folder once; the
+  // directory handle is persisted in IndexedDB (handles are structured-cloneable,
+  // this is the documented way to keep one across reloads) and re-used on every
+  // visit, provided the browser still grants read permission for it. Chrome/Edge
+  // only — Safari and Firefox don't implement showDirectoryPicker, so the whole
+  // feature quietly hides itself there and the manual upload / drag-and-drop /
+  // zip path (unchanged above) remains the only — and fully sufficient — option.
+  var FOLDER_POLL_MS = 120000;
+  var HANDLE_DB_NAME = 'fleet-signal-fs';
+  var HANDLE_STORE = 'handles';
+  var HANDLE_KEY = 'dataFolder';
+  var folderLinkSupported = ('showDirectoryPicker' in window) && ('indexedDB' in window);
+
+  function openHandleDB(){
+    return new Promise(function(resolve, reject){
+      var req = indexedDB.open(HANDLE_DB_NAME, 1);
+      req.onupgradeneeded = function(){ req.result.createObjectStore(HANDLE_STORE); };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    });
+  }
+  function saveDirHandle(handle){
+    return openHandleDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(HANDLE_STORE, 'readwrite');
+        tx.objectStore(HANDLE_STORE).put(handle, HANDLE_KEY);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+  function loadDirHandle(){
+    return openHandleDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(HANDLE_STORE, 'readonly');
+        var req = tx.objectStore(HANDLE_STORE).get(HANDLE_KEY);
+        req.onsuccess = function(){ resolve(req.result || null); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    });
+  }
+  function clearDirHandle(){
+    return openHandleDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(HANDLE_STORE, 'readwrite');
+        tx.objectStore(HANDLE_STORE).delete(HANDLE_KEY);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+
+  // Recursively walks a directory handle (subfolders included, mirroring the
+  // existing "Select folder" input's behavior) collecting real File objects for
+  // anything handleFiles already knows how to read — .csv/.xlsx/.xls directly,
+  // plus .zip so a colleague can drop a zipped export into the shared folder too.
+  function collectFilesFromDirHandle(dirHandle, collected){
+    collected = collected || [];
+    var tasks = [];
+    var iterator = dirHandle.values();
+    function step(){
+      return iterator.next().then(function(res){
+        if (res.done) return Promise.all(tasks).then(function(){ return collected; });
+        var entry = res.value;
+        if (entry.kind === 'file'){
+          if (DATA_FILE_RE.test(entry.name) || ZIP_FILE_RE.test(entry.name)){
+            tasks.push(entry.getFile().then(function(file){ collected.push(file); }));
+          }
+        } else if (entry.kind === 'directory'){
+          tasks.push(collectFilesFromDirHandle(entry, collected));
+        }
+        return step();
+      });
+    }
+    return step();
+  }
+
+  function renderFolderLinkUI(){
+    var linked = !!state.linkedDirHandle;
+    var granted = linked && state.folderPermission === 'granted';
+
+    ['linkFolderBtn', 'emptyLinkFolderBtn'].forEach(function(id){
+      var el = $(id);
+      if (el) el.style.display = (folderLinkSupported && !linked) ? 'inline-flex' : 'none';
+    });
+
+    var pill = $('folderStatusPill');
+    if (pill){
+      pill.style.display = linked ? 'inline-flex' : 'none';
+      if (linked){
+        var syncText = state.folderLastSync
+          ? ('synced ' + new Date(state.folderLastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+          : 'not synced yet';
+        pill.textContent = 'Folder linked: ' + (state.folderName || 'folder') + ' · ' + (granted ? syncText : 'access needed');
+        pill.classList.toggle('error', !granted);
+      }
+    }
+    if ($('reloadFolderBtn')) $('reloadFolderBtn').style.display = (linked && granted) ? 'inline-flex' : 'none';
+    if ($('reactivateFolderBtn')) $('reactivateFolderBtn').style.display = (linked && !granted) ? 'inline-flex' : 'none';
+    if ($('unlinkFolderBtn')) $('unlinkFolderBtn').style.display = linked ? 'inline-flex' : 'none';
+    if ($('emptyReactivateRow')) $('emptyReactivateRow').style.display = (linked && !granted && !state.devices.length) ? 'block' : 'none';
+  }
+
+  // Single entry point for every kind of (re)load from the linked folder — the
+  // initial auto-load on page open, the manual "Reload folder" click, and the
+  // silent 2-minute background poll all funnel through here so the permission
+  // check and UI refresh stay consistent no matter what triggered it.
+  function loadFromLinkedFolder(opts){
+    opts = opts || {};
+    if (!state.linkedDirHandle) return Promise.resolve();
+    return state.linkedDirHandle.queryPermission({ mode: 'read' }).catch(function(){ return 'denied'; }).then(function(perm){
+      state.folderPermission = perm;
+      renderFolderLinkUI();
+      if (perm !== 'granted'){
+        if (!opts.silent) showToast('Folder access needs to be reactivated', true);
+        return;
+      }
+      var btn = $('reloadFolderBtn');
+      if (btn) btn.disabled = true;
+      return collectFilesFromDirHandle(state.linkedDirHandle).then(function(files){
+        if (!files.length){
+          if (!opts.silent) showToast('No .csv/.xlsx/.zip files found in the linked folder', true);
+          return;
+        }
+        handleFiles(files);
+        state.folderLastSync = Date.now();
+      }).catch(function(){
+        if (!opts.silent) showToast('Could not read the linked folder — check access and try again', true);
+      }).finally(function(){
+        if (btn) btn.disabled = false;
+        renderFolderLinkUI();
+      });
+    });
+  }
+
+  function linkDataFolder(){
+    if (!folderLinkSupported){
+      showToast('Folder linking needs Chrome or Edge — use the upload or drag-and-drop options instead', true);
+      return;
+    }
+    window.showDirectoryPicker({ id: 'fleet-signal-data-folder', mode: 'read' }).then(function(handle){
+      state.linkedDirHandle = handle;
+      state.folderName = handle.name || 'folder';
+      state.folderPermission = 'granted';
+      closeLinkFolderModal();
+      renderFolderLinkUI();
+      showToast('Folder linked — loading files…');
+      saveDirHandle(handle).catch(function(){ /* best effort — the link still works for this session */ });
+      return loadFromLinkedFolder();
+    }).catch(function(err){
+      if (err && err.name === 'AbortError') return; // user closed the picker — no error toast needed
+      showToast('Could not link the folder', true);
+    });
+  }
+
+  function reactivateFolderAccess(){
+    if (!state.linkedDirHandle) return;
+    state.linkedDirHandle.requestPermission({ mode: 'read' }).then(function(perm){
+      state.folderPermission = perm;
+      renderFolderLinkUI();
+      if (perm === 'granted'){
+        showToast('Folder access restored — reloading…');
+        return loadFromLinkedFolder();
+      }
+      showToast('Folder access was not granted', true);
+    }).catch(function(){
+      showToast('Could not restore folder access — you may need to relink the folder', true);
+    });
+  }
+
+  function unlinkDataFolder(){
+    state.linkedDirHandle = null;
+    state.folderPermission = null;
+    state.folderName = '';
+    state.folderLastSync = null;
+    if (state.folderPollTimer){ clearInterval(state.folderPollTimer); state.folderPollTimer = null; }
+    clearDirHandle().catch(function(){ /* best effort */ });
+    renderFolderLinkUI();
+    showToast('Folder unlinked');
+  }
+
+  function openLinkFolderModal(){ $('linkFolderOverlay').classList.remove('hidden'); }
+  function closeLinkFolderModal(){ $('linkFolderOverlay').classList.add('hidden'); }
+
+  function copyFolderPath(){
+    var text = $('folderPathDisplay').value;
+    var done = function(){ showToast('Path copied'); };
+    var fail = function(){ showToast('Could not copy — select the text and copy it manually', true); };
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done).catch(function(){
+        try {
+          $('folderPathDisplay').select();
+          document.execCommand('copy');
+          done();
+        } catch (e){ fail(); }
+      });
+    } else {
+      try {
+        $('folderPathDisplay').select();
+        document.execCommand('copy');
+        done();
+      } catch (e){ fail(); }
+    }
+  }
+
+  // Checks for a previously linked folder on page load: if permission is still
+  // granted, reloads silently right away; if not, leaves the "Reactivate folder
+  // access" affordance visible instead of prompting (requestPermission must be
+  // called from a user gesture, so it can't be triggered automatically here).
+  // Either way, starts the 2-minute background poll, which re-checks permission
+  // on every tick and simply skips the read if it's no longer granted.
+  function initFolderLink(){
+    if (!folderLinkSupported){ renderFolderLinkUI(); return; }
+    loadDirHandle().then(function(handle){
+      if (!handle){ renderFolderLinkUI(); return; }
+      state.linkedDirHandle = handle;
+      state.folderName = handle.name || 'folder';
+      return handle.queryPermission({ mode: 'read' }).then(function(perm){
+        state.folderPermission = perm;
+        renderFolderLinkUI();
+        if (perm === 'granted') return loadFromLinkedFolder({ silent: true });
+      });
+    }).catch(function(){
+      renderFolderLinkUI();
+    }).finally(function(){
+      state.folderPollTimer = setInterval(function(){
+        if (state.linkedDirHandle) loadFromLinkedFolder({ silent: true, background: true });
+      }, FOLDER_POLL_MS);
+    });
+  }
+
   function exportCsv(){
     var opt = $('exportCsvOption');
     var originalLabel = opt.textContent;
@@ -1843,6 +2117,16 @@ tbody tr:hover{background:var(--panel-2);}
   $('emptyUploadBtn').addEventListener('click', function(){ $('fileInput').click(); });
   $('folderBtn').addEventListener('click', function(){ $('folderInput').click(); });
   $('emptyFolderBtn').addEventListener('click', function(){ $('folderInput').click(); });
+  $('linkFolderBtn').addEventListener('click', openLinkFolderModal);
+  $('emptyLinkFolderBtn').addEventListener('click', openLinkFolderModal);
+  $('linkFolderCancel').addEventListener('click', closeLinkFolderModal);
+  $('linkFolderOverlay').addEventListener('click', function(e){ if (e.target === $('linkFolderOverlay')) closeLinkFolderModal(); });
+  $('chooseFolderBtn').addEventListener('click', linkDataFolder);
+  $('copyFolderPathBtn').addEventListener('click', copyFolderPath);
+  $('reloadFolderBtn').addEventListener('click', function(){ loadFromLinkedFolder(); });
+  $('reactivateFolderBtn').addEventListener('click', reactivateFolderAccess);
+  $('emptyReactivateBtn').addEventListener('click', reactivateFolderAccess);
+  $('unlinkFolderBtn').addEventListener('click', unlinkDataFolder);
   $('fileInput').addEventListener('change', function(e){
     if (e.target.files && e.target.files.length) handleFiles(e.target.files);
     e.target.value = '';
@@ -1938,6 +2222,7 @@ tbody tr:hover{background:var(--panel-2);}
 
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape' && !$('modalOverlay').classList.contains('hidden')) closeModal();
+    if (e.key === 'Escape' && !$('linkFolderOverlay').classList.contains('hidden')) closeLinkFolderModal();
   });
 
   var sortHeaders = document.querySelectorAll('thead th.sortable');
@@ -1990,6 +2275,7 @@ tbody tr:hover{background:var(--panel-2);}
   });
   loadHistory().then(function(history){ state.historyMap = history; renderTrendChart(); });
   setInterval(pollReviews, POLL_INTERVAL_MS);
+  initFolderLink();
 })();
 </script>
 </body>

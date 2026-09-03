@@ -279,6 +279,10 @@ thead th{
 }
 thead th.sortable{cursor:pointer;user-select:none;}
 thead th.sortable:hover{color:var(--text-secondary);}
+thead th.sortable:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;color:var(--text-secondary);}
+/* Rows are focusable (role=button) so the table is fully keyboard-operable; the ring
+   uses -2px offset so it stays inside the cell borders rather than overlapping them. */
+tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;background:var(--panel-2);}
 thead th.sortable::after{content:'';opacity:0;}
 thead th.sort-asc::after{content:' ↑';opacity:1;color:var(--accent);}
 thead th.sort-desc::after{content:' ↓';opacity:1;color:var(--accent);}
@@ -536,8 +540,8 @@ tbody tr:hover{background:var(--panel-2);}
 </div>
 
 <div class="overlay hidden" id="linkFolderOverlay">
-  <div class="modal">
-    <h2>Link the shared data folder</h2>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="linkFolderTitle">
+    <h2 id="linkFolderTitle">Link the shared data folder</h2>
     <p style="color:var(--text-secondary);font-size:13px;line-height:1.5;margin:0 0 18px;">
       Point Fleet Signal at the shared network folder so it re-reads the latest device exports on its own — no more manual uploads. The folder link and its permission are stored only in this browser.
     </p>
@@ -563,7 +567,7 @@ tbody tr:hover{background:var(--panel-2);}
 </div>
 
 <div class="overlay hidden" id="modalOverlay">
-  <div class="modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalDeviceName">
     <h2 id="modalDeviceName">Device</h2>
     <p class="dev-id" id="modalDeviceId"></p>
     <a href="#" target="_blank" rel="noopener" class="monitoring-link" id="modalMonitoringLink">
@@ -595,7 +599,7 @@ tbody tr:hover{background:var(--panel-2);}
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 (function(){
@@ -609,7 +613,7 @@ tbody tr:hover{background:var(--panel-2);}
 
   var state = {
     devices: [],
-    typesList: [],
+    deviceById: {},
     statusMap: {},
     meta: null,
     filtered: [],
@@ -760,16 +764,6 @@ tbody tr:hover{background:var(--panel-2);}
       hwSet[deviceType][hardwareType] = true;
       devices.push({ id: id, fqsn: fqsn, segment: segment, deviceType: deviceType, hardwareType: hardwareType, firmwareVersion: firmwareVersion, lastPing: lastPing, lastConn: lastConn, status: status });
     });
-  }
-
-  function processWorkbook(wb){
-    var devices = [], typesSet = {}, hwSet = {};
-    wb.SheetNames.forEach(function(sheetName){
-      var ws = wb.Sheets[sheetName];
-      var rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      processRows(rows, devices, typesSet, hwSet);
-    });
-    return { devices: devices, types: Object.keys(typesSet).sort(), hwByType: hwSet };
   }
 
   function processCsvText(text, devices, typesSet, hwSet){
@@ -1595,8 +1589,23 @@ tbody tr:hover{background:var(--panel-2);}
       ths[i].classList.remove('sort-asc', 'sort-desc');
       if (ths[i].dataset.sort === state.sortKey){
         ths[i].classList.add(state.sortDir === 'desc' ? 'sort-desc' : 'sort-asc');
+        ths[i].setAttribute('aria-sort', state.sortDir === 'desc' ? 'descending' : 'ascending');
+      } else {
+        ths[i].setAttribute('aria-sort', 'none');
       }
     }
+  }
+
+  // The search box re-filters every device on each keystroke. At ~37k devices that
+  // is a noticeable stall while typing, and every intermediate keystroke's result is
+  // thrown away anyway — so only the last one in a 200ms burst actually runs.
+  var searchDebounceTimer = null;
+  function debouncedApplyFilters(){
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(function(){
+      searchDebounceTimer = null;
+      applyFilters();
+    }, 200);
   }
 
   function applyFilters(){
@@ -1640,11 +1649,12 @@ tbody tr:hover{background:var(--panel-2);}
     var start = (state.page - 1) * state.pageSize;
     var pageRows = state.filtered.slice(start, start + state.pageSize);
 
-    var body = $('tableBody');
-    body.innerHTML = '';
-    pageRows.forEach(function(d){
-      var tr = document.createElement('tr');
-      tr.dataset.id = d.id;
+    // Built as one HTML string and assigned in a single write: the previous version
+    // created 50 elements, set innerHTML on each, attached a listener to each and
+    // appended them one at a time — 50 separate DOM mutations plus 50 closures kept
+    // alive per render. Row clicks are now handled by one delegated listener on the
+    // tbody (see below), so re-rendering doesn't churn listeners at all.
+    var html = pageRows.map(function(d){
       var rec = state.statusMap[d.id];
       var checked = rec && rec.checked;
       var comment = rec && rec.comment ? rec.comment : '';
@@ -1653,7 +1663,7 @@ tbody tr:hover{background:var(--panel-2);}
         var short = comment.length > 42 ? comment.slice(0, 42) + '…' : comment;
         reviewCell += '<div class="comment-flag has-comment" title="' + escapeHtml(comment) + '">' + COMMENT_ICON + escapeHtml(short) + '</div>';
       }
-      tr.innerHTML =
+      return '<tr data-id="' + escapeHtml(d.id) + '" tabindex="0" role="button" aria-label="Open review for ' + escapeHtml(d.fqsn) + '">' +
         '<td class="mono">' + escapeHtml(d.fqsn) + (comment ? ' <span class="comment-dot" title="Has a comment"></span>' : '') + '</td>' +
         '<td>' + escapeHtml(d.segment) + '</td>' +
         '<td>' + escapeHtml(d.deviceType) + '</td>' +
@@ -1662,10 +1672,10 @@ tbody tr:hover{background:var(--panel-2);}
         '<td><span class="status-chip ' + d.status + '"><span class="dot"></span>' + statusLabel(d.status) + '</span></td>' +
         '<td class="mono">' + fmtDate(d.lastPing) + '</td>' +
         '<td class="mono">' + fmtDate(d.lastConn) + '</td>' +
-        '<td class="review-cell">' + reviewCell + '</td>';
-      tr.addEventListener('click', function(){ openModal(d.id); });
-      body.appendChild(tr);
-    });
+        '<td class="review-cell">' + reviewCell + '</td>' +
+      '</tr>';
+    }).join('');
+    $('tableBody').innerHTML = html;
 
     $('countNote').textContent = totalRows.toLocaleString() + ' devices match';
     $('pageInfo').textContent = 'Page ' + state.page + ' of ' + totalPages + ' (' + totalRows.toLocaleString() + ' rows)';
@@ -1674,14 +1684,19 @@ tbody tr:hover{background:var(--panel-2);}
     renderSortIndicators();
   }
 
+  // The lookup map used to live inside the replace callback, which meant a fresh
+  // object literal was allocated for every single escaped character. escapeHtml runs
+  // roughly nine times per table row, so that added up to thousands of throwaway
+  // objects per render. Hoisted here it is allocated exactly once.
+  var HTML_ESCAPES = { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' };
   function escapeHtml(s){
-    return String(s).replace(/[&<>"']/g, function(c){
-      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
-    });
+    return String(s).replace(/[&<>"']/g, function(c){ return HTML_ESCAPES[c]; });
   }
 
+  var modalReturnFocus = null;
+
   function openModal(id){
-    var d = state.devices.find(function(x){ return x.id === id; });
+    var d = state.deviceById[id];
     if (!d) return;
     state.activeDeviceId = id;
     $('modalDeviceName').textContent = d.fqsn;
@@ -1699,7 +1714,11 @@ tbody tr:hover{background:var(--panel-2);}
     $('modalComment').value = rec.comment || '';
     $('modalName').value = state.lastName || '';
     $('modalSavedNote').textContent = rec.checkedAt ? 'Last saved ' + fmtDate(rec.checkedAt) + ' by …' : '';
+    // Remember what had focus (usually the table row) so closing can hand it back —
+    // otherwise keyboard users get dumped at the top of the document after every review.
+    modalReturnFocus = document.activeElement;
     $('modalOverlay').classList.remove('hidden');
+    $('modalChecked').focus();
     if (rec.checkedByEnc){
       decryptText(rec.checkedByEnc).then(function(name){
         if (state.activeDeviceId !== id) return;
@@ -1712,8 +1731,23 @@ tbody tr:hover{background:var(--panel-2);}
   }
 
   function closeModal(){
+    var reopenedId = state.activeDeviceId;
     $('modalOverlay').classList.add('hidden');
     state.activeDeviceId = null;
+    // Saving a review re-renders the whole table, so the <tr> that was clicked is
+    // usually gone by now — a stored element reference would be detached and focusing
+    // it would silently do nothing. Re-find the row for that device by id instead, and
+    // only fall back to the remembered element if it's still attached.
+    var target = reopenedId
+      ? $('tableBody').querySelector('tr[data-id="' + (window.CSS && CSS.escape ? CSS.escape(reopenedId) : reopenedId) + '"]')
+      : null;
+    if (!target && modalReturnFocus && document.contains(modalReturnFocus) && modalReturnFocus !== document.body){
+      target = modalReturnFocus;
+    }
+    if (target){
+      try { target.focus(); } catch (e) { /* non-focusable or detached — nothing to restore */ }
+    }
+    modalReturnFocus = null;
   }
 
   function saveModal(){
@@ -1743,6 +1777,13 @@ tbody tr:hover{background:var(--panel-2);}
     });
   }
 
+  // Serialized snapshot of the last reviews payload, so the 20s poll can tell an
+  // actual change from the (far more common) "nothing happened" response. Without
+  // this, every poll re-ran renderKPIs + a full re-filter of ~37k devices + a table
+  // re-render three times a minute, forever, even when no colleague touched anything.
+  var lastReviewsSignature = null;
+  var lastHistorySignature = null;
+
   function pollReviews(){
     if (!$('modalOverlay').classList.contains('hidden')) return;
     loadStatusMap().then(function(map){
@@ -1751,9 +1792,13 @@ tbody tr:hover{background:var(--panel-2);}
         renderSyncPill();
         return;
       }
+      var signature = JSON.stringify(map);
+      var changed = signature !== lastReviewsSignature;
+      lastReviewsSignature = signature;
       state.statusMap = map;
       state.reviewsSynced = true;
       renderSyncPill();
+      if (!changed) return;
       if (!state.devices.length) return;
       var keepPage = state.page;
       renderKPIs();
@@ -1761,7 +1806,16 @@ tbody tr:hover{background:var(--panel-2);}
       state.page = keepPage;
       renderTable();
     });
-    loadHistory().then(function(history){ state.historyMap = history; renderTrendChart(); });
+    loadHistory().then(function(history){
+      // Same reasoning as the reviews guard above: renderTrendChart destroys and
+      // rebuilds two Chart.js instances, which is wasted work (and a visible flicker
+      // while expanded) when the daily snapshot hasn't moved since the last poll.
+      var sig = JSON.stringify(history);
+      if (sig === lastHistorySignature) return;
+      lastHistorySignature = sig;
+      state.historyMap = history;
+      renderTrendChart();
+    });
   }
 
   function renderSyncPill(){
@@ -1868,8 +1922,11 @@ tbody tr:hover{background:var(--panel-2);}
         }
         var types = Object.keys(typesSet).sort();
         state.devices = devices;
-        state.typesList = types;
-        state.hwByType = hwSet;
+        // Built once per load so openModal (and anything else needing a device by id)
+        // is an O(1) lookup instead of scanning all ~37k devices on every row click.
+        var byId = {};
+        for (var di = 0; di < devices.length; di++) byId[devices[di].id] = devices[di];
+        state.deviceById = byId;
         state.meta = buildMeta(devices, types, files.length === 1 ? files[0].name : files.length + ' files');
         renderMetaPill();
         populateTypeFilter();
@@ -2273,7 +2330,21 @@ tbody tr:hover{background:var(--panel-2);}
       else showToast('No files found in what was dropped', true);
     });
   });
-  $('searchInput').addEventListener('input', applyFilters);
+  // One listener for the whole table instead of one per row — survives re-renders,
+  // so renderTable never has to attach or tear down handlers. Rows carry data-id.
+  $('tableBody').addEventListener('click', function(e){
+    var tr = e.target.closest('tr[data-id]');
+    if (tr) openModal(tr.dataset.id);
+  });
+  $('tableBody').addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var tr = e.target.closest('tr[data-id]');
+    if (!tr) return;
+    e.preventDefault(); // stop Space from scrolling the page
+    openModal(tr.dataset.id);
+  });
+
+  $('searchInput').addEventListener('input', debouncedApplyFilters);
   $('statusFilter').addEventListener('change', applyFilters);
   $('typeFilter').addEventListener('change', onTypeFilterChanged);
   $('hwFilter').addEventListener('change', onHwFilterChanged);
@@ -2350,17 +2421,28 @@ tbody tr:hover{background:var(--panel-2);}
   var sortHeaders = document.querySelectorAll('thead th.sortable');
   for (var si = 0; si < sortHeaders.length; si++){
     (function(th){
-      th.addEventListener('click', function(){
+      // Headers were mouse-only before: clickable but not reachable or activatable
+      // from the keyboard. tabindex + Enter/Space makes sorting available to keyboard
+      // users, and aria-sort (set in renderSortIndicators) announces the current state.
+      th.setAttribute('tabindex', '0');
+      th.setAttribute('role', 'button');
+      function doSort(){
         var key = th.dataset.sort;
         if (state.sortKey === key){
           state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
         } else {
           state.sortKey = key;
-          state.sortDir = (key === 'lastPing' || key === 'lastConn') ? 'asc' : 'asc';
+          state.sortDir = 'asc';
         }
         sortFiltered();
         state.page = 1;
         renderTable();
+      }
+      th.addEventListener('click', doSort);
+      th.addEventListener('keydown', function(e){
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        doSort();
       });
     })(sortHeaders[si]);
   }
@@ -2396,7 +2478,17 @@ tbody tr:hover{background:var(--panel-2);}
     renderSyncPill();
   });
   loadHistory().then(function(history){ state.historyMap = history; renderTrendChart(); });
-  setInterval(pollReviews, POLL_INTERVAL_MS);
+  // Polling every 20s in a tab nobody is looking at just burns network and battery —
+  // and a colleague leaving the dashboard open all day is the normal case here. Skip
+  // while hidden, then refresh once immediately on return so the view is never stale
+  // at the moment it's actually looked at.
+  setInterval(function(){
+    if (document.hidden) return;
+    pollReviews();
+  }, POLL_INTERVAL_MS);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) pollReviews();
+  });
   initFolderLink();
 })();
 </script>

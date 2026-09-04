@@ -321,6 +321,29 @@ tbody tr:hover{background:var(--panel-2);}
 
 .overlay{position:fixed;inset:0;background:rgba(4,7,14,.6);display:flex;align-items:flex-start;justify-content:center;padding:60px 20px;z-index:50;overflow-y:auto;}
 .overlay.hidden{display:none;}
+/* Loading overlay — shown while the linked network folder is being read. Network
+   drives can stall for a long time (or forever, if V: is disconnected), so this has
+   a second "not reachable" state that appears after a timeout instead of leaving the
+   user staring at a spinner with no explanation. Centered rather than top-aligned
+   like the other overlays, because there is nothing to scroll here. */
+.overlay.loading-overlay{align-items:center;z-index:60;}
+.loading-card{background:var(--bg-1);box-shadow:var(--shadow-modal);border-radius:var(--radius-modal);padding:30px 28px;width:100%;max-width:420px;text-align:center;}
+.spinner{width:38px;height:38px;margin:0 auto 18px;border:3px solid var(--border);border-top-color:var(--cta);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading-card h2{font-family:var(--font-display);font-size:17px;font-weight:500;margin:0 0 6px;color:var(--text-primary);}
+.loading-card p{font-size:13px;color:var(--text-secondary);margin:0;line-height:1.55;}
+.loading-card .loading-path{font-family:var(--font-mono);font-size:11.5px;color:var(--text-muted);margin-top:12px;word-break:break-all;}
+.loading-warn{margin-top:20px;padding-top:18px;border-top:1px solid var(--border);text-align:left;}
+.loading-warn .warn-title{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:var(--never);margin-bottom:8px;}
+.loading-warn .warn-title svg{width:16px;height:16px;flex-shrink:0;}
+.loading-warn ul{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-secondary);line-height:1.7;}
+.loading-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;}
+/* Respect users who've asked the OS to reduce motion — the spinner still indicates
+   activity by pulsing opacity rather than rotating. */
+@media (prefers-reduced-motion: reduce){
+  .spinner{animation:fade-pulse 1.4s ease-in-out infinite;}
+  @keyframes fade-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+}
 .modal{background:var(--bg-1);box-shadow:var(--shadow-modal);border-radius:var(--radius-modal);padding:26px;width:100%;max-width:480px;}
 .modal h2{font-family:var(--font-display);font-size:18px;font-weight:500;margin:0 0 2px;color:var(--text-primary);}
 .modal .dev-id{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin:0 0 10px;word-break:break-all;}
@@ -595,6 +618,31 @@ tbody tr:hover{background:var(--panel-2);}
     <div class="modal-actions">
       <button class="btn-ghost" id="modalCancel">Cancel</button>
       <button class="btn btn-primary" id="modalSave">Save review</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay loading-overlay hidden" id="loadingOverlay">
+  <div class="loading-card" role="dialog" aria-modal="true" aria-labelledby="loadingTitle" aria-describedby="loadingMsg">
+    <div class="spinner" id="loadingSpinner" aria-hidden="true"></div>
+    <h2 id="loadingTitle">Loading data</h2>
+    <p id="loadingMsg" role="status" aria-live="polite">Reading the linked folder…</p>
+    <p class="loading-path" id="loadingPath"></p>
+    <div class="loading-warn" id="loadingWarn" style="display:none;">
+      <div class="warn-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Folder is not responding
+      </div>
+      <p>The linked folder hasn't answered yet. This usually means the network drive isn't reachable right now.</p>
+      <ul>
+        <li>Check that the <span class="mono">V:</span> drive is connected in Windows Explorer</li>
+        <li>Reconnect to the company network or VPN if you're working remotely</li>
+        <li>Then use Retry, or fall back to uploading the files manually</li>
+      </ul>
+      <div class="loading-actions">
+        <button class="btn" id="loadingDismissBtn">Dismiss</button>
+        <button class="btn btn-primary" id="loadingRetryBtn">Retry</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1882,17 +1930,20 @@ tbody tr:hover{background:var(--panel-2);}
     var candidates = all.filter(function(f){ return DATA_FILE_RE.test(f.name) || ZIP_FILE_RE.test(f.name); });
     if (!candidates.length){
       showToast(all.length ? 'No .csv/.xlsx/.zip files found among the selected items' : 'No files selected', true);
-      return;
+      return Promise.resolve(false);
     }
     var uploadBtn = $('uploadBtn');
     uploadBtn.disabled = true; uploadBtn.textContent = 'Reading files…';
 
-    expandZipFiles(candidates).then(function(files){
+    // Returns a promise resolving to true once devices are actually rendered, so
+    // callers (the folder loader) can keep a progress indicator up for the whole
+    // read+parse, not just the file enumeration.
+    return expandZipFiles(candidates).then(function(files){
       files = files.filter(function(f){ return DATA_FILE_RE.test(f.name); });
       if (!files.length){
         showToast('No .csv/.xlsx files found inside the zip', true);
         uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
-        return;
+        return false;
       }
       uploadBtn.textContent = 'Processing ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '…';
 
@@ -1914,11 +1965,11 @@ tbody tr:hover{background:var(--panel-2);}
         });
       });
 
-      Promise.all(tasks).then(function(){
+      return Promise.all(tasks).then(function(){
         if (!devices.length){
           showToast('No matching devices found in the selected file(s)', true);
           uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
-          return;
+          return false;
         }
         var types = Object.keys(typesSet).sort();
         state.devices = devices;
@@ -1940,19 +1991,25 @@ tbody tr:hover{background:var(--panel-2);}
         renderTrendChart();
         showToast('Loaded ' + devices.length.toLocaleString() + ' devices from ' + files.length + ' file' + (files.length > 1 ? 's' : '') + ' — data stays in this browser tab only');
         uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
+        // Deliberately not chained into the returned promise: the dashboard is already
+        // usable at this point, and a slow Firebase write shouldn't hold the loading
+        // indicator open behind fully rendered data.
         saveHistorySnapshot(devices).then(function(){
           return loadHistory();
         }).then(function(history){
           state.historyMap = history;
           renderTrendChart();
         });
+        return true;
       }).catch(function(err){
         showToast('Could not read one of the files — check they are valid exports', true);
         uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
+        return false;
       });
     }).catch(function(err){
       showToast('Could not read the zip file', true);
       uploadBtn.disabled = false; uploadBtn.textContent = 'Update data';
+      return false;
     });
   }
 
@@ -2078,6 +2135,63 @@ tbody tr:hover{background:var(--panel-2);}
   // initial auto-load on page open and the manual "Reload folder" click both
   // funnel through here so the permission check and UI refresh stay consistent
   // no matter which one triggered it. No background polling — see initFolderLink().
+  // ---- Loading indicator for folder reads -------------------------------
+  // Reading a mapped network drive is the one operation here that can stall for a
+  // long time — or never return at all, if V: is disconnected. The File System
+  // Access API gives no progress events and its directory iteration can't be
+  // aborted, so this shows a spinner immediately and, after a timeout, explains
+  // what's likely wrong instead of spinning silently forever.
+  var FOLDER_STALL_MS = 12000;
+  var loadingGeneration = 0;   // invalidates callbacks from a superseded/dismissed load
+  var loadingStallTimer = null;
+
+  function beginLoading(message){
+    loadingGeneration++;
+    var gen = loadingGeneration;
+    if (loadingStallTimer) clearTimeout(loadingStallTimer);
+    $('loadingMsg').textContent = message || 'Loading…';
+    $('loadingPath').textContent = $('folderPathDisplay') ? $('folderPathDisplay').value : '';
+    $('loadingWarn').style.display = 'none';
+    $('loadingSpinner').style.display = 'block';
+    $('loadingTitle').textContent = 'Loading data';
+    $('loadingOverlay').classList.remove('hidden');
+    loadingStallTimer = setTimeout(function(){
+      if (gen !== loadingGeneration) return;
+      showLoadingWarning();
+    }, FOLDER_STALL_MS);
+    return gen;
+  }
+
+  function updateLoading(gen, message){
+    if (gen !== loadingGeneration) return;
+    $('loadingMsg').textContent = message;
+  }
+
+  function showLoadingWarning(failedOutright){
+    // Keep the spinner running on a timeout (the read may still succeed), but drop it
+    // once we know the read actually failed — there's nothing left in flight.
+    $('loadingSpinner').style.display = failedOutright ? 'none' : 'block';
+    $('loadingTitle').textContent = failedOutright ? 'Could not read the folder' : 'Still loading…';
+    $('loadingMsg').textContent = failedOutright
+      ? 'The linked folder could not be read.'
+      : 'This is taking longer than expected.';
+    $('loadingWarn').style.display = 'block';
+  }
+
+  function endLoading(gen){
+    if (gen !== loadingGeneration) return;
+    if (loadingStallTimer){ clearTimeout(loadingStallTimer); loadingStallTimer = null; }
+    $('loadingOverlay').classList.add('hidden');
+  }
+
+  function dismissLoading(){
+    // Bumping the generation detaches any still-pending read from the UI, so if it
+    // does eventually resolve it won't pop the overlay back open behind the user.
+    loadingGeneration++;
+    if (loadingStallTimer){ clearTimeout(loadingStallTimer); loadingStallTimer = null; }
+    $('loadingOverlay').classList.add('hidden');
+  }
+
   function loadFromLinkedFolder(opts){
     opts = opts || {};
     if (!state.linkedDirHandle) return Promise.resolve();
@@ -2090,15 +2204,23 @@ tbody tr:hover{background:var(--panel-2);}
       }
       var btn = $('reloadFolderBtn');
       if (btn) btn.disabled = true;
+      var gen = beginLoading('Scanning the linked folder…');
       return collectFilesFromDirHandle(state.linkedDirHandle).then(function(files){
         if (!files.length){
+          endLoading(gen);
           if (!opts.silent) showToast('No .csv/.xlsx/.zip files found in the linked folder', true);
           return;
         }
-        handleFiles(files);
-        state.folderLastSync = Date.now();
+        updateLoading(gen, 'Reading ' + files.length + ' file' + (files.length > 1 ? 's' : '') + '…');
+        return handleFiles(files).then(function(loaded){
+          if (loaded) state.folderLastSync = Date.now();
+          endLoading(gen);
+        });
       }).catch(function(){
-        if (!opts.silent) showToast('Could not read the linked folder — check access and try again', true);
+        // Surface the failure in the overlay rather than a toast: a toast disappears,
+        // and this is exactly the case where the user needs the "check the V: drive"
+        // guidance and a retry button in front of them.
+        if (gen === loadingGeneration) showLoadingWarning(true);
       }).finally(function(){
         if (btn) btn.disabled = false;
         renderFolderLinkUI();
@@ -2413,9 +2535,19 @@ tbody tr:hover{background:var(--panel-2);}
     if (e.key === 'Escape') $('exportDropdown').classList.add('hidden');
   });
 
+  $('loadingDismissBtn').addEventListener('click', dismissLoading);
+  $('loadingRetryBtn').addEventListener('click', function(){
+    dismissLoading();
+    loadFromLinkedFolder();
+  });
+
   document.addEventListener('keydown', function(e){
     if (e.key === 'Escape' && !$('modalOverlay').classList.contains('hidden')) closeModal();
     if (e.key === 'Escape' && !$('linkFolderOverlay').classList.contains('hidden')) closeLinkFolderModal();
+    // Only dismissable once the warning is up — Escape shouldn't hide a healthy
+    // in-progress load, since the read would carry on invisibly behind the user.
+    if (e.key === 'Escape' && !$('loadingOverlay').classList.contains('hidden')
+        && $('loadingWarn').style.display === 'block') dismissLoading();
   });
 
   var sortHeaders = document.querySelectorAll('thead th.sortable');
